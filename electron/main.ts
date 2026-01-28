@@ -2,7 +2,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow } from './windows'
+import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, closeCameraPreviewWindow } from './windows'
 import { registerIpcHandlers } from './ipc/handlers'
 
 
@@ -126,6 +126,11 @@ app.on('window-all-closed', () => {
   // Keep app running (macOS behavior)
 })
 
+// Close camera preview window before app quits
+app.on('before-quit', () => {
+  closeCameraPreviewWindow();
+})
+
 app.on('activate', () => {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
@@ -138,9 +143,10 @@ app.on('activate', () => {
 
 // Register all IPC handlers when app is ready
 app.whenReady().then(async () => {
-    // Listen for HUD overlay quit event (macOS only)
+    // Listen for HUD overlay quit event
     const { ipcMain } = await import('electron');
     ipcMain.on('hud-overlay-close', () => {
+      closeCameraPreviewWindow(); // Close camera preview before quitting
       app.quit();
     });
     createTray()

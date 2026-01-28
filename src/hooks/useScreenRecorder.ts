@@ -1,15 +1,70 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { fixWebmDuration } from "@fix-webm-duration/fix";
+
+export type CameraShape = "circle" | "rectangle";
+export type CameraPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+export interface CameraSettings {
+  enabled: boolean;
+  deviceId: string | null;
+  shape: CameraShape;
+  size: number; // percentage of screen width (5-30%)
+  position: CameraPosition;
+}
+
+export interface MicrophoneSettings {
+  enabled: boolean;
+  deviceId: string | null;
+}
+
+export interface CameraDevice {
+  deviceId: string;
+  label: string;
+}
+
+export interface MicrophoneDevice {
+  deviceId: string;
+  label: string;
+}
 
 type UseScreenRecorderReturn = {
   recording: boolean;
   toggleRecording: () => void;
+  cameraSettings: CameraSettings;
+  setCameraSettings: React.Dispatch<React.SetStateAction<CameraSettings>>;
+  availableCameras: CameraDevice[];
+  refreshCameras: () => Promise<void>;
+  cameraPreviewStream: MediaStream | null;
+  microphoneSettings: MicrophoneSettings;
+  setMicrophoneSettings: React.Dispatch<React.SetStateAction<MicrophoneSettings>>;
+  availableMicrophones: MicrophoneDevice[];
+  refreshMicrophones: () => Promise<void>;
+};
+
+const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
+  enabled: false,
+  deviceId: null,
+  shape: "circle",
+  size: 15, // 15% of screen width
+  position: "bottom-right",
+};
+
+const DEFAULT_MICROPHONE_SETTINGS: MicrophoneSettings = {
+  enabled: false,
+  deviceId: null,
 };
 
 export function useScreenRecorder(): UseScreenRecorderReturn {
   const [recording, setRecording] = useState(false);
+  const [cameraSettings, setCameraSettings] = useState<CameraSettings>(DEFAULT_CAMERA_SETTINGS);
+  const [availableCameras, setAvailableCameras] = useState<CameraDevice[]>([]);
+  const [cameraPreviewStream, setCameraPreviewStream] = useState<MediaStream | null>(null);
+  const [microphoneSettings, setMicrophoneSettings] = useState<MicrophoneSettings>(DEFAULT_MICROPHONE_SETTINGS);
+  const [availableMicrophones, setAvailableMicrophones] = useState<MicrophoneDevice[]>([]);
+  
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
+  const audioStream = useRef<MediaStream | null>(null);
   const chunks = useRef<Blob[]>([]);
   const startTime = useRef<number>(0);
 
@@ -45,15 +100,134 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
     return Math.round(18_000_000 * highFrameRateBoost);
   };
 
+  // Refresh available cameras list
+  const refreshCameras = useCallback(async () => {
+    try {
+      // Request permission first to get device labels
+      await navigator.mediaDevices.getUserMedia({ video: true }).then(s => {
+        s.getTracks().forEach(t => t.stop());
+      }).catch(() => {});
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices
+        .filter(device => device.kind === 'videoinput')
+        .map(device => ({
+          deviceId: device.deviceId,
+          label: device.label || `Camera ${device.deviceId.slice(0, 8)}`,
+        }));
+      setAvailableCameras(cameras);
+      
+      // Auto-select first camera if none selected
+      if (cameras.length > 0 && !cameraSettings.deviceId) {
+        setCameraSettings(prev => ({ ...prev, deviceId: cameras[0].deviceId }));
+      }
+    } catch (error) {
+      console.error('Failed to enumerate cameras:', error);
+    }
+  }, [cameraSettings.deviceId]);
+
+  // Refresh available microphones list
+  const refreshMicrophones = useCallback(async () => {
+    try {
+      // Request permission first to get device labels
+      await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => {
+        s.getTracks().forEach(t => t.stop());
+      }).catch(() => {});
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const microphones = devices
+        .filter(device => device.kind === 'audioinput')
+        .map(device => ({
+          deviceId: device.deviceId,
+          label: device.label || `Microphone ${device.deviceId.slice(0, 8)}`,
+        }));
+      setAvailableMicrophones(microphones);
+      
+      // Auto-select first microphone if none selected
+      if (microphones.length > 0 && !microphoneSettings.deviceId) {
+        setMicrophoneSettings(prev => ({ ...prev, deviceId: microphones[0].deviceId }));
+      }
+    } catch (error) {
+      console.error('Failed to enumerate microphones:', error);
+    }
+  }, [microphoneSettings.deviceId]);
+
+  // Initialize cameras and microphones on mount
+  useEffect(() => {
+    refreshCameras();
+    refreshMicrophones();
+  }, []);
+
+  // Manage camera preview stream (no longer stops when recording)
+  useEffect(() => {
+    let isMounted = true;
+    
+    const startPreview = async () => {
+      // Stop existing preview
+      if (cameraPreviewStream) {
+        cameraPreviewStream.getTracks().forEach(t => t.stop());
+        setCameraPreviewStream(null);
+      }
+      
+      if (cameraSettings.enabled && cameraSettings.deviceId) {
+        try {
+          const previewStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: cameraSettings.deviceId },
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+            },
+            audio: false,
+          });
+          
+          if (isMounted) {
+            setCameraPreviewStream(previewStream);
+          } else {
+            previewStream.getTracks().forEach(t => t.stop());
+          }
+        } catch (error) {
+          console.error('Failed to start camera preview:', error);
+        }
+      }
+    };
+    
+    startPreview();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [cameraSettings.enabled, cameraSettings.deviceId]);
+
+  // Cleanup preview stream on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraPreviewStream) {
+        cameraPreviewStream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, []);
+
   const stopRecording = useRef(() => {
     if (mediaRecorder.current?.state === "recording") {
+      // Stop screen stream
       if (stream.current) {
         stream.current.getTracks().forEach(track => track.stop());
+        stream.current = null;
       }
+      
+      // Stop audio stream
+      if (audioStream.current) {
+        audioStream.current.getTracks().forEach(track => track.stop());
+        audioStream.current = null;
+      }
+      
       mediaRecorder.current.stop();
       setRecording(false);
 
       window.electronAPI?.setRecordingState(false);
+      
+      // Update camera preview to hide recording indicator
+      window.electronAPI?.updateCameraPreview?.({ recording: false });
     }
   });
 
@@ -76,23 +250,47 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         stream.current.getTracks().forEach(track => track.stop());
         stream.current = null;
       }
+      if (audioStream.current) {
+        audioStream.current.getTracks().forEach(track => track.stop());
+        audioStream.current = null;
+      }
     };
   }, []);
 
   const startRecording = async () => {
     try {
       const selectedSource = await window.electronAPI.getSelectedSource();
+      console.log('Starting recording with source:', selectedSource);
       if (!selectedSource) {
         alert("Please select a source to record");
         return;
       }
+
+      // Determine the actual source to record
+      // If camera is enabled and source is a window, record the screen instead
+      // so the camera preview window will be included in the recording
+      let actualSourceId = selectedSource.id;
+      const isWindowSource = selectedSource.id.startsWith('window:');
+      console.log('Is window source:', isWindowSource, 'Camera enabled:', cameraSettings.enabled);
+      
+      if (isWindowSource && cameraSettings.enabled) {
+        // Get the screen that contains this window
+        const screenSourceResult = await window.electronAPI?.getScreenForWindow?.(selectedSource.name);
+        console.log('Screen for window result:', screenSourceResult);
+        if (screenSourceResult?.success && screenSourceResult.screenId) {
+          actualSourceId = screenSourceResult.screenId;
+          console.log('Camera enabled with window source, switching to screen recording:', actualSourceId);
+        }
+      }
+      
+      console.log('Actual source ID to record:', actualSourceId);
 
       const mediaStream = await (navigator.mediaDevices as any).getUserMedia({
         audio: false,
         video: {
           mandatory: {
             chromeMediaSource: "desktop",
-            chromeMediaSourceId: selectedSource.id,
+            chromeMediaSourceId: actualSourceId,
             maxWidth: TARGET_WIDTH,
             maxHeight: TARGET_HEIGHT,
             maxFrameRate: TARGET_FRAME_RATE,
@@ -116,6 +314,29 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       }
 
       let { width = 1920, height = 1080, frameRate = TARGET_FRAME_RATE } = videoTrack.getSettings();
+
+      // Position camera preview within the window area if camera is enabled
+      if (cameraSettings.enabled && window.electronAPI?.positionCameraPreviewInArea) {
+        try {
+          // Always use the original selected source for positioning
+          // so camera preview appears in the window area
+          const boundsResult = await window.electronAPI.getSourceBounds?.(
+            selectedSource.id, 
+            selectedSource.name,
+            { width, height }
+          );
+          if (boundsResult?.success && boundsResult.bounds) {
+            await window.electronAPI.positionCameraPreviewInArea({
+              area: boundsResult.bounds,
+              size: cameraSettings.size,
+              shape: cameraSettings.shape,
+              position: cameraSettings.position,
+            });
+          }
+        } catch (error) {
+          console.warn('Failed to position camera preview:', error);
+        }
+      }
       
       // Ensure dimensions are divisible by 2 for VP9/AV1 codec compatibility
       width = Math.floor(width / 2) * 2;
@@ -124,16 +345,44 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       const videoBitsPerSecond = computeBitrate(width, height);
       const mimeType = selectMimeType();
 
+      // Use the screen stream directly (no camera compositing)
+      const recordingStream = stream.current;
+
+      // Get microphone stream if enabled
+      if (microphoneSettings.enabled && microphoneSettings.deviceId) {
+        try {
+          const micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: { exact: microphoneSettings.deviceId },
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+            video: false,
+          });
+          audioStream.current = micStream;
+          
+          // Add audio tracks to recording stream
+          micStream.getAudioTracks().forEach(track => {
+            recordingStream.addTrack(track);
+          });
+        } catch (error) {
+          console.warn('Failed to get microphone stream, recording without audio:', error);
+        }
+      }
+
+      const hasAudio = recordingStream.getAudioTracks().length > 0;
       console.log(
         `Recording at ${width}x${height} @ ${frameRate ?? TARGET_FRAME_RATE}fps using ${mimeType} / ${Math.round(
           videoBitsPerSecond / 1_000_000
-        )} Mbps`
+        )} Mbps${hasAudio ? ' (with audio)' : ''}`
       );
       
       chunks.current = [];
-      const recorder = new MediaRecorder(stream.current, {
+      const recorder = new MediaRecorder(recordingStream, {
         mimeType,
         videoBitsPerSecond,
+        audioBitsPerSecond: hasAudio ? 128000 : undefined, // 128kbps audio
       });
       mediaRecorder.current = recorder;
       recorder.ondataavailable = e => {
@@ -173,12 +422,21 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       startTime.current = Date.now();
       setRecording(true);
       window.electronAPI?.setRecordingState(true);
+      
+      // Update camera preview to show recording indicator
+      if (cameraSettings.enabled) {
+        window.electronAPI?.updateCameraPreview?.({ recording: true });
+      }
     } catch (error) {
       console.error('Failed to start recording:', error);
       setRecording(false);
       if (stream.current) {
         stream.current.getTracks().forEach(track => track.stop());
         stream.current = null;
+      }
+      if (audioStream.current) {
+        audioStream.current.getTracks().forEach(track => track.stop());
+        audioStream.current = null;
       }
     }
   };
@@ -187,5 +445,17 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
     recording ? stopRecording.current() : startRecording();
   };
 
-  return { recording, toggleRecording };
+  return { 
+    recording, 
+    toggleRecording,
+    cameraSettings,
+    setCameraSettings,
+    availableCameras,
+    refreshCameras,
+    cameraPreviewStream,
+    microphoneSettings,
+    setMicrophoneSettings,
+    availableMicrophones,
+    refreshMicrophones,
+  };
 }

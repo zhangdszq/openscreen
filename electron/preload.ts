@@ -63,4 +63,45 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPlatform: () => {
     return ipcRenderer.invoke('get-platform')
   },
+  
+  // Camera Preview Window APIs
+  showCameraPreview: (options: { size: number; shape: 'circle' | 'rectangle'; position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' }) => {
+    return ipcRenderer.invoke('show-camera-preview', options)
+  },
+  hideCameraPreview: () => {
+    return ipcRenderer.invoke('hide-camera-preview')
+  },
+  closeCameraPreview: () => {
+    return ipcRenderer.invoke('close-camera-preview')
+  },
+  updateCameraPreview: (options: { size?: number; shape?: 'circle' | 'rectangle'; position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'; recording?: boolean }) => {
+    return ipcRenderer.invoke('update-camera-preview', options)
+  },
+  resizeCameraPreview: (newSize: number) => {
+    return ipcRenderer.invoke('resize-camera-preview', newSize)
+  },
+  positionCameraPreviewInArea: (options: { 
+    area: { x: number; y: number; width: number; height: number }; 
+    size: number; 
+    shape: 'circle' | 'rectangle'; 
+    position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' 
+  }) => {
+    return ipcRenderer.invoke('position-camera-preview-in-area', options)
+  },
+  getSourceBounds: (sourceId: string, sourceName?: string, videoDimensions?: { width: number; height: number }) => {
+    return ipcRenderer.invoke('get-source-bounds', sourceId, sourceName, videoDimensions)
+  },
+  getScreenForWindow: (windowName: string) => {
+    return ipcRenderer.invoke('get-screen-for-window', windowName)
+  },
+  onCameraPreviewInit: (callback: (options: any) => void) => {
+    const listener = (_: any, options: any) => callback(options)
+    ipcRenderer.on('camera-preview-init', listener)
+    return () => ipcRenderer.removeListener('camera-preview-init', listener)
+  },
+  onCameraPreviewUpdate: (callback: (options: any) => void) => {
+    const listener = (_: any, options: any) => callback(options)
+    ipcRenderer.on('camera-preview-update', listener)
+    return () => ipcRenderer.removeListener('camera-preview-update', listener)
+  },
 })

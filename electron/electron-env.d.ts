@@ -42,6 +42,17 @@ interface Window {
     getPlatform: () => Promise<string>
     hudOverlayHide: () => void;
     hudOverlayClose: () => void;
+    // Camera Preview APIs
+    showCameraPreview?: (options: { size: number; shape: 'circle' | 'rectangle'; position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' }) => Promise<{ success: boolean }>
+    hideCameraPreview?: () => Promise<{ success: boolean }>
+    closeCameraPreview?: () => Promise<{ success: boolean }>
+    updateCameraPreview?: (options: { size?: number; shape?: 'circle' | 'rectangle'; position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'; recording?: boolean }) => Promise<{ success: boolean }>
+    resizeCameraPreview?: (newSize: number) => Promise<{ success: boolean }>
+    positionCameraPreviewInArea?: (options: { area: { x: number; y: number; width: number; height: number }; size: number; shape: 'circle' | 'rectangle'; position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' }) => Promise<{ success: boolean }>
+    getSourceBounds?: (sourceId: string, sourceName?: string, videoDimensions?: { width: number; height: number }) => Promise<{ success: boolean; bounds?: { x: number; y: number; width: number; height: number }; isScreen?: boolean }>
+    getScreenForWindow?: (windowName: string) => Promise<{ success: boolean; screenId?: string; displayBounds?: { x: number; y: number; width: number; height: number } }>
+    onCameraPreviewInit?: (callback: (options: any) => void) => () => void
+    onCameraPreviewUpdate?: (callback: (options: any) => void) => () => void
   }
 }
 
