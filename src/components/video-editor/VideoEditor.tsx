@@ -654,75 +654,23 @@ export default function VideoEditor() {
         let exportHeight: number;
         let bitrate: number;
 
-        if (quality === 'source') {
-          // Use source resolution
-          exportWidth = sourceWidth;
-          exportHeight = sourceHeight;
-
-          if (aspectRatioValue === 1) {
-            // Square (1:1): use smaller dimension to avoid codec limits
-            const baseDimension = Math.floor(Math.min(sourceWidth, sourceHeight) / 2) * 2;
-            exportWidth = baseDimension;
-            exportHeight = baseDimension;
-          } else if (aspectRatioValue > 1) {
-            // Landscape: find largest even dimensions that exactly match aspect ratio
-            const baseWidth = Math.floor(sourceWidth / 2) * 2;
-            let found = false;
-            for (let w = baseWidth; w >= 100 && !found; w -= 2) {
-              const h = Math.round(w / aspectRatioValue);
-              if (h % 2 === 0 && Math.abs((w / h) - aspectRatioValue) < 0.0001) {
-                exportWidth = w;
-                exportHeight = h;
-                found = true;
-              }
-            }
-            if (!found) {
-              exportWidth = baseWidth;
-              exportHeight = Math.floor((baseWidth / aspectRatioValue) / 2) * 2;
-            }
-          } else {
-            // Portrait: find largest even dimensions that exactly match aspect ratio
-            const baseHeight = Math.floor(sourceHeight / 2) * 2;
-            let found = false;
-            for (let h = baseHeight; h >= 100 && !found; h -= 2) {
-              const w = Math.round(h * aspectRatioValue);
-              if (w % 2 === 0 && Math.abs((w / h) - aspectRatioValue) < 0.0001) {
-                exportWidth = w;
-                exportHeight = h;
-                found = true;
-              }
-            }
-            if (!found) {
-              exportHeight = baseHeight;
-              exportWidth = Math.floor((baseHeight * aspectRatioValue) / 2) * 2;
-            }
-          }
-
-          // Calculate visually lossless bitrate matching screen recording optimization
-          const totalPixels = exportWidth * exportHeight;
-          bitrate = 30_000_000;
-          if (totalPixels > 1920 * 1080 && totalPixels <= 2560 * 1440) {
-            bitrate = 50_000_000;
-          } else if (totalPixels > 2560 * 1440) {
-            bitrate = 80_000_000;
-          }
+        // Quality-based target resolution:
+        // - medium (Low): 720p, 8 Mbps
+        // - good (Medium): 1080p, 15 Mbps  
+        // - source (High): 4K (2160p), 25 Mbps
+        const targetHeight = quality === 'medium' ? 720 : quality === 'good' ? 1080 : 2160;
+        
+        // Calculate dimensions maintaining aspect ratio
+        exportHeight = Math.floor(targetHeight / 2) * 2;
+        exportWidth = Math.floor((exportHeight * aspectRatioValue) / 2) * 2;
+        
+        // Adjust bitrate based on resolution
+        if (targetHeight <= 720) {
+          bitrate = 8_000_000;   // 8 Mbps for 720p
+        } else if (targetHeight <= 1080) {
+          bitrate = 15_000_000;  // 15 Mbps for 1080p
         } else {
-          // Use quality-based target resolution
-          const targetHeight = quality === 'medium' ? 720 : 1080;
-          
-          // Calculate dimensions maintaining aspect ratio
-          exportHeight = Math.floor(targetHeight / 2) * 2;
-          exportWidth = Math.floor((exportHeight * aspectRatioValue) / 2) * 2;
-          
-          // Adjust bitrate for lower resolutions
-          const totalPixels = exportWidth * exportHeight;
-          if (totalPixels <= 1280 * 720) {
-            bitrate = 10_000_000;
-          } else if (totalPixels <= 1920 * 1080) {
-            bitrate = 20_000_000;
-          } else {
-            bitrate = 30_000_000;
-          }
+          bitrate = 25_000_000;  // 25 Mbps for 4K
         }
 
         const exporter = new VideoExporter({

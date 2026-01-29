@@ -613,7 +613,7 @@ export function SettingsPanel({
                 exportQuality === 'medium' ? "bg-white text-black" : "text-slate-400 hover:text-slate-200"
               )}
             >
-              Low
+              720p
             </button>
             <button
               onClick={() => onExportQualityChange?.('good')}
@@ -622,7 +622,7 @@ export function SettingsPanel({
                 exportQuality === 'good' ? "bg-white text-black" : "text-slate-400 hover:text-slate-200"
               )}
             >
-              Medium
+              1080p
             </button>
             <button
               onClick={() => onExportQualityChange?.('source')}
@@ -631,7 +631,7 @@ export function SettingsPanel({
                 exportQuality === 'source' ? "bg-white text-black" : "text-slate-400 hover:text-slate-200"
               )}
             >
-              High
+              4K
             </button>
           </div>
         )}
