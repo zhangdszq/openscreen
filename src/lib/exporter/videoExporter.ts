@@ -2,6 +2,7 @@ import type { ExportConfig, ExportProgress, ExportResult } from './types';
 import { VideoFileDecoder } from './videoDecoder';
 import { FrameRenderer } from './frameRenderer';
 import { VideoMuxer } from './muxer';
+import { AudioExtractor } from './audioExtractor';
 import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion } from '@/components/video-editor/types';
 
 interface VideoExporterConfig extends ExportConfig {
@@ -29,6 +30,7 @@ export class VideoExporter {
   private renderer: FrameRenderer | null = null;
   private encoder: VideoEncoder | null = null;
   private muxer: VideoMuxer | null = null;
+  private audioExtractor: AudioExtractor | null = null;
   private cancelled = false;
   private encodeQueue = 0;
   // Increased queue size for better throughput with hardware encoding
@@ -38,6 +40,7 @@ export class VideoExporter {
   // Track muxing promises for parallel processing
   private muxingPromises: Promise<void>[] = [];
   private chunkCount = 0;
+  private hasAudio = false;
 
   constructor(config: VideoExporterConfig) {
     this.config = config;
@@ -103,12 +106,43 @@ export class VideoExporter {
       });
       await this.renderer.initialize();
 
-      // Initialize video encoder
+      // Start audio extraction in parallel (don't await yet)
+      this.audioExtractor = new AudioExtractor({
+        videoUrl: this.config.videoUrl,
+        trimRegions: this.config.trimRegions,
+      });
+      const audioExtractionPromise = this.audioExtractor.extract().catch(error => {
+        console.warn('[VideoExporter] Audio extraction failed:', error);
+        return { audioBuffer: null as AudioBuffer | null, hasAudio: false };
+      });
+
+      // Initialize video encoder (parallel with audio extraction)
       await this.initializeEncoder();
 
-      // Initialize muxer
-      this.muxer = new VideoMuxer(this.config, false);
+      // Wait for audio extraction to complete
+      const extractedAudio = await audioExtractionPromise;
+      this.hasAudio = extractedAudio.hasAudio;
+      console.log('[VideoExporter] Audio extraction:', this.hasAudio ? 'success' : 'no audio');
+
+      // Initialize muxer with audio support
+      this.muxer = new VideoMuxer(this.config, this.hasAudio);
       await this.muxer.initialize();
+
+      // Start audio encoding in background (parallel with video encoding)
+      let audioEncodingPromise: Promise<void> = Promise.resolve();
+      if (this.hasAudio && extractedAudio.audioBuffer && this.audioExtractor) {
+        console.log('[VideoExporter] Starting audio encoding in parallel...');
+        audioEncodingPromise = this.audioExtractor.encodeToAAC(
+          extractedAudio.audioBuffer,
+          async (chunk, meta) => {
+            if (this.muxer && !this.cancelled) {
+              await this.muxer.addAudioChunk(chunk, meta);
+            }
+          }
+        ).catch(error => {
+          console.warn('[VideoExporter] Audio encoding failed:', error);
+        });
+      }
 
       // Get the video element for frame extraction
       const videoElement = this.decoder.getVideoElement();
@@ -213,13 +247,20 @@ export class VideoExporter {
         return { success: false, error: 'Export cancelled' };
       }
 
-      // Finalize encoding
+      // Finalize video encoding
       if (this.encoder && this.encoder.state === 'configured') {
         await this.encoder.flush();
       }
 
-      // Wait for all muxing operations to complete
+      // Wait for all video muxing operations to complete
       await Promise.all(this.muxingPromises);
+
+      // Wait for audio encoding to complete (was running in parallel)
+      if (this.hasAudio) {
+        console.log('[VideoExporter] Waiting for audio encoding to complete...');
+        await audioEncodingPromise;
+        console.log('[VideoExporter] Audio encoding complete');
+      }
 
       // Finalize muxer and get output blob
       const blob = await this.muxer!.finalize();
@@ -368,11 +409,21 @@ export class VideoExporter {
       this.renderer = null;
     }
 
+    if (this.audioExtractor) {
+      try {
+        this.audioExtractor.destroy();
+      } catch (e) {
+        console.warn('Error destroying audio extractor:', e);
+      }
+      this.audioExtractor = null;
+    }
+
     this.muxer = null;
     this.encodeQueue = 0;
     this.muxingPromises = [];
     this.chunkCount = 0;
     this.videoDescription = undefined;
     this.videoColorSpace = undefined;
+    this.hasAudio = false;
   }
 }

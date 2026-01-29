@@ -38,9 +38,9 @@ export class VideoMuxer {
       frameRate: this.config.frameRate,
     });
 
-    // Create audio source if needed
+    // Create audio source if needed (AAC for MP4 compatibility)
     if (this.hasAudio) {
-      this.audioSource = new EncodedAudioPacketSource('opus');
+      this.audioSource = new EncodedAudioPacketSource('aac');
       this.output.addAudioTrack(this.audioSource);
     }
 
