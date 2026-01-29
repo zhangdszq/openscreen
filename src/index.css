@@ -68,6 +68,17 @@
     -webkit-user-select: none;
     user-select: none;
   }
+  /* Camera preview window needs fully transparent background, no scrollbars, and full height */
+  html.camera-preview-window,
+  html.camera-preview-window body,
+  html.camera-preview-window #root {
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    overflow: hidden !important;
+  }
 }
 
 /* Smooth timeline cursor animations */

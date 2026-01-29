@@ -67,6 +67,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
   const audioStream = useRef<MediaStream | null>(null);
   const chunks = useRef<Blob[]>([]);
   const startTime = useRef<number>(0);
+  const recordingTimestamp = useRef<number>(0);
+  const recordingBounds = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   // Target visually lossless 4K @ 60fps; fall back gracefully when hardware cannot keep up
   const TARGET_FRAME_RATE = 60;
@@ -221,6 +223,9 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         audioStream.current = null;
       }
       
+      // Note: Mouse tracking is stopped in recorder.onstop to ensure
+      // it captures all events until the very end
+      
       mediaRecorder.current.stop();
       setRecording(false);
 
@@ -315,26 +320,43 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 
       let { width = 1920, height = 1080, frameRate = TARGET_FRAME_RATE } = videoTrack.getSettings();
 
+      // Get source bounds for camera positioning and mouse tracking
+      let sourceBounds: { x: number; y: number; width: number; height: number } | null = null;
+      try {
+        const boundsResult = await window.electronAPI.getSourceBounds?.(
+          selectedSource.id, 
+          selectedSource.name,
+          { width, height }
+        );
+        if (boundsResult?.success && boundsResult.bounds) {
+          sourceBounds = boundsResult.bounds;
+        }
+      } catch (error) {
+        console.warn('Failed to get source bounds:', error);
+      }
+
       // Position camera preview within the window area if camera is enabled
-      if (cameraSettings.enabled && window.electronAPI?.positionCameraPreviewInArea) {
+      if (cameraSettings.enabled && window.electronAPI?.positionCameraPreviewInArea && sourceBounds) {
         try {
-          // Always use the original selected source for positioning
-          // so camera preview appears in the window area
-          const boundsResult = await window.electronAPI.getSourceBounds?.(
-            selectedSource.id, 
-            selectedSource.name,
-            { width, height }
-          );
-          if (boundsResult?.success && boundsResult.bounds) {
-            await window.electronAPI.positionCameraPreviewInArea({
-              area: boundsResult.bounds,
-              size: cameraSettings.size,
-              shape: cameraSettings.shape,
-              position: cameraSettings.position,
-            });
-          }
+          await window.electronAPI.positionCameraPreviewInArea({
+            area: sourceBounds,
+            size: cameraSettings.size,
+            shape: cameraSettings.shape,
+            position: cameraSettings.position,
+          });
         } catch (error) {
           console.warn('Failed to position camera preview:', error);
+        }
+      }
+
+      // Start mouse tracking for auto-zoom feature
+      if (sourceBounds && window.electronAPI?.startMouseTracking) {
+        try {
+          recordingBounds.current = sourceBounds;
+          await window.electronAPI.startMouseTracking(sourceBounds);
+          console.log('Mouse tracking started with bounds:', sourceBounds);
+        } catch (error) {
+          console.warn('Failed to start mouse tracking:', error);
         }
       }
       
@@ -390,13 +412,28 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       };
       recorder.onstop = async () => {
         stream.current = null;
+        
+        // Stop mouse tracking and get the data
+        let mouseTrackData = null;
+        if (window.electronAPI?.stopMouseTracking) {
+          try {
+            const result = await window.electronAPI.stopMouseTracking();
+            if (result.success && result.data) {
+              mouseTrackData = result.data;
+              console.log(`Mouse tracking stopped, captured ${mouseTrackData.events?.length || 0} events`);
+            }
+          } catch (error) {
+            console.warn('Failed to stop mouse tracking:', error);
+          }
+        }
+        
         if (chunks.current.length === 0) return;
         const duration = Date.now() - startTime.current;
         const recordedChunks = chunks.current;
         const buggyBlob = new Blob(recordedChunks, { type: mimeType });
         // Clear chunks early to free memory immediately after blob creation
         chunks.current = [];
-        const timestamp = Date.now();
+        const timestamp = recordingTimestamp.current || Date.now();
         const videoFileName = `recording-${timestamp}.webm`;
 
         try {
@@ -406,6 +443,17 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
           if (!videoResult.success) {
             console.error('Failed to store video:', videoResult.message);
             return;
+          }
+
+          // Save mouse events data
+          if (mouseTrackData && window.electronAPI?.saveMouseEvents) {
+            const mouseFileName = `recording-${timestamp}.mouse.json`;
+            try {
+              await window.electronAPI.saveMouseEvents(mouseTrackData, mouseFileName);
+              console.log('Mouse events saved:', mouseFileName);
+            } catch (error) {
+              console.warn('Failed to save mouse events:', error);
+            }
           }
 
           if (videoResult.path) {
@@ -420,6 +468,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       recorder.onerror = () => setRecording(false);
       recorder.start(1000);
       startTime.current = Date.now();
+      recordingTimestamp.current = Date.now();
       setRecording(true);
       window.electronAPI?.setRecordingState(true);
       

@@ -80,6 +80,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resizeCameraPreview: (newSize: number) => {
     return ipcRenderer.invoke('resize-camera-preview', newSize)
   },
+  resizeCameraPreviewRect: (newWidth: number, newHeight: number) => {
+    return ipcRenderer.invoke('resize-camera-preview-rect', newWidth, newHeight)
+  },
   positionCameraPreviewInArea: (options: { 
     area: { x: number; y: number; width: number; height: number }; 
     size: number; 
@@ -103,5 +106,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_: any, options: any) => callback(options)
     ipcRenderer.on('camera-preview-update', listener)
     return () => ipcRenderer.removeListener('camera-preview-update', listener)
+  },
+
+  // Mouse tracking APIs
+  startMouseTracking: (bounds: { x: number; y: number; width: number; height: number }) => {
+    return ipcRenderer.invoke('start-mouse-tracking', bounds)
+  },
+  checkAccessibilityPermission: () => {
+    return ipcRenderer.invoke('check-accessibility-permission')
+  },
+  requestAccessibilityPermission: () => {
+    return ipcRenderer.invoke('request-accessibility-permission')
+  },
+  stopMouseTracking: () => {
+    return ipcRenderer.invoke('stop-mouse-tracking')
+  },
+  isMouseTracking: () => {
+    return ipcRenderer.invoke('is-mouse-tracking')
+  },
+  recordMouseClick: (button: 'left' | 'right' | 'middle' = 'left') => {
+    return ipcRenderer.invoke('record-mouse-click', button)
+  },
+  saveMouseEvents: (mouseData: any, fileName: string) => {
+    return ipcRenderer.invoke('save-mouse-events', mouseData, fileName)
+  },
+  loadMouseEvents: (videoPath: string) => {
+    return ipcRenderer.invoke('load-mouse-events', videoPath)
   },
 })

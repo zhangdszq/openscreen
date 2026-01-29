@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTimelineContext } from "dnd-timeline";
 import { Button } from "@/components/ui/button";
-import { Plus, Scissors, ZoomIn, MessageSquare, ChevronDown, Check } from "lucide-react";
+import { Plus, Scissors, ZoomIn, MessageSquare, ChevronDown, Check, MousePointer2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import TimelineWrapper from "./TimelineWrapper";
@@ -9,7 +9,7 @@ import Row from "./Row";
 import Item from "./Item";
 import KeyframeMarkers from "./KeyframeMarkers";
 import type { Range, Span } from "dnd-timeline";
-import type { ZoomRegion, TrimRegion, AnnotationRegion } from "../types";
+import type { ZoomRegion, TrimRegion, AnnotationRegion, RecordedMouseEvent } from "../types";
 import { v4 as uuidv4 } from 'uuid';
 import {
   DropdownMenu,
@@ -24,6 +24,7 @@ import { TutorialHelp } from "../TutorialHelp";
 const ZOOM_ROW_ID = "row-zoom";
 const TRIM_ROW_ID = "row-trim";
 const ANNOTATION_ROW_ID = "row-annotation";
+const MOUSE_ROW_ID = "row-mouse";
 const FALLBACK_RANGE_MS = 1000;
 const TARGET_MARKER_COUNT = 12;
 
@@ -51,6 +52,9 @@ interface TimelineEditorProps {
   onSelectAnnotation?: (id: string | null) => void;
   aspectRatio: AspectRatio;
   onAspectRatioChange: (aspectRatio: AspectRatio) => void;
+  // Mouse click events for auto-zoom feature
+  mouseClickEvents?: RecordedMouseEvent[];
+  onAutoZoomFromClicks?: () => void;
 }
 
 interface TimelineScaleConfig {
@@ -243,6 +247,63 @@ function PlaybackCursor({
   );
 }
 
+// Mouse click markers component
+function MouseClickMarkers({
+  clickEvents,
+  videoDurationMs,
+}: {
+  clickEvents: RecordedMouseEvent[];
+  videoDurationMs: number;
+}) {
+  const { sidebarWidth, direction, range, valueToPixels } = useTimelineContext();
+  const sideProperty = direction === "rtl" ? "right" : "left";
+
+  if (!clickEvents || clickEvents.length === 0) {
+    return null;
+  }
+
+  // Filter to only click events within visible range
+  const visibleClicks = clickEvents.filter(
+    (event) => event.type === 'click' && event.timestampMs >= range.start && event.timestampMs <= range.end
+  );
+
+  return (
+    <div
+      className="h-6 relative"
+      style={{
+        [sideProperty === "right" ? "marginRight" : "marginLeft"]: `${sidebarWidth}px`,
+      }}
+    >
+      {/* Row label */}
+      <div
+        className="absolute top-0 left-0 h-full flex items-center px-2 text-[10px] text-slate-500 font-medium bg-[#09090b] z-10"
+        style={{
+          width: sidebarWidth,
+          [sideProperty]: `-${sidebarWidth}px`,
+        }}
+      >
+        <MousePointer2 className="w-3 h-3 mr-1" />
+        Clicks
+      </div>
+      
+      {/* Click markers */}
+      {visibleClicks.map((event) => {
+        const offset = valueToPixels(event.timestampMs - range.start);
+        return (
+          <div
+            key={event.id}
+            className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-blue-500 border border-blue-300 shadow-sm hover:scale-150 transition-transform cursor-pointer"
+            style={{
+              [sideProperty]: `${offset - 4}px`, // Center the dot
+            }}
+            title={`Click at ${(event.timestampMs / 1000).toFixed(2)}s (${(event.x * 100).toFixed(0)}%, ${(event.y * 100).toFixed(0)}%)`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function TimelineAxis({
   intervalMs,
   videoDurationMs,
@@ -372,6 +433,7 @@ function Timeline({
   selectedZoomId,
   selectedTrimId,
   selectedAnnotationId,
+  mouseClickEvents,
 }: {
   items: TimelineRenderItem[];
   videoDurationMs: number;
@@ -384,6 +446,7 @@ function Timeline({
   selectedZoomId: string | null;
   selectedTrimId?: string | null;
   selectedAnnotationId?: string | null;
+  mouseClickEvents?: RecordedMouseEvent[];
 }) {
   const { setTimelineRef, style, sidebarWidth, range, pixelsToValue } = useTimelineContext();
   const localTimelineRef = useRef<HTMLDivElement | null>(null);
@@ -482,6 +545,14 @@ function Timeline({
           </Item>
         ))}
       </Row>
+
+      {/* Mouse click markers row */}
+      {mouseClickEvents && mouseClickEvents.length > 0 && (
+        <MouseClickMarkers
+          clickEvents={mouseClickEvents}
+          videoDurationMs={videoDurationMs}
+        />
+      )}
     </div>
   );
 }
@@ -510,6 +581,8 @@ export default function TimelineEditor({
   onSelectAnnotation,
   aspectRatio,
   onAspectRatioChange,
+  mouseClickEvents = [],
+  onAutoZoomFromClicks,
 }: TimelineEditorProps) {
   const totalMs = useMemo(() => Math.max(0, Math.round(videoDuration * 1000)), [videoDuration]);
   const currentTimeMs = useMemo(() => Math.round(currentTime * 1000), [currentTime]);
@@ -882,6 +955,21 @@ export default function TimelineEditor({
           >
             <MessageSquare className="w-4 h-4" />
           </Button>
+          {mouseClickEvents.length > 0 && onAutoZoomFromClicks && (
+            <>
+              <div className="w-[1px] h-4 bg-white/10 mx-1" />
+              <Button
+                onClick={onAutoZoomFromClicks}
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-slate-400 hover:text-blue-400 hover:bg-blue-400/10 transition-all gap-1"
+                title="Auto-generate zoom regions from mouse clicks"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>Auto Zoom ({mouseClickEvents.filter(e => e.type === 'click').length})</span>
+              </Button>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <DropdownMenu>
@@ -953,6 +1041,7 @@ export default function TimelineEditor({
             selectedZoomId={selectedZoomId}
             selectedTrimId={selectedTrimId}
             selectedAnnotationId={selectedAnnotationId}
+            mouseClickEvents={mouseClickEvents}
           />
         </TimelineWrapper>
       </div>

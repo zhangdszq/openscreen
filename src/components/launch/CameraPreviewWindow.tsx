@@ -32,11 +32,11 @@ export function CameraPreviewWindow() {
 
     const initCamera = async () => {
       try {
+        // Request high resolution for good quality when cropped to any aspect ratio
         const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            width: { ideal: 480 },
-            height: { ideal: 480 },
-            aspectRatio: { ideal: 1 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
           audio: false,
         });
@@ -161,32 +161,55 @@ export function CameraPreviewWindow() {
       const deltaX = e.screenX - resizeStartRef.current.x;
       const deltaY = e.screenY - resizeStartRef.current.y;
       
-      let delta = 0;
-      
-      // Calculate delta based on resize direction
-      switch (resizeDirection) {
-        case 'e':
-        case 'se':
-          delta = deltaX;
-          break;
-        case 'w':
-        case 'nw':
-          delta = -deltaX;
-          break;
-        case 's':
-        case 'sw':
-          delta = deltaY;
-          break;
-        case 'n':
-        case 'ne':
-          delta = -deltaY;
-          break;
+      // For circle: uniform resize; for rectangle: independent width/height
+      if (options.shape === 'circle') {
+        // Circle: use single dimension (uniform resize)
+        let delta = 0;
+        switch (resizeDirection) {
+          case 'e':
+          case 'se':
+            delta = deltaX;
+            break;
+          case 'w':
+          case 'nw':
+            delta = -deltaX;
+            break;
+          case 's':
+          case 'sw':
+            delta = deltaY;
+            break;
+          case 'n':
+          case 'ne':
+            delta = -deltaY;
+            break;
+        }
+        const newSize = Math.max(80, Math.min(400, resizeStartRef.current.width + delta));
+        window.electronAPI?.resizeCameraPreview?.(newSize);
+      } else {
+        // Rectangle: independent width/height resize
+        let newWidth = resizeStartRef.current.width;
+        let newHeight = resizeStartRef.current.height;
+        
+        // Horizontal resize
+        if (resizeDirection === 'e' || resizeDirection === 'se' || resizeDirection === 'ne') {
+          newWidth = resizeStartRef.current.width + deltaX;
+        } else if (resizeDirection === 'w' || resizeDirection === 'sw' || resizeDirection === 'nw') {
+          newWidth = resizeStartRef.current.width - deltaX;
+        }
+        
+        // Vertical resize
+        if (resizeDirection === 's' || resizeDirection === 'se' || resizeDirection === 'sw') {
+          newHeight = resizeStartRef.current.height + deltaY;
+        } else if (resizeDirection === 'n' || resizeDirection === 'ne' || resizeDirection === 'nw') {
+          newHeight = resizeStartRef.current.height - deltaY;
+        }
+        
+        // Clamp values
+        newWidth = Math.max(80, Math.min(500, newWidth));
+        newHeight = Math.max(60, Math.min(400, newHeight));
+        
+        window.electronAPI?.resizeCameraPreviewRect?.(newWidth, newHeight);
       }
-      
-      const newSize = Math.max(80, Math.min(400, resizeStartRef.current.width + delta));
-      
-      // Request main process to resize window
-      window.electronAPI?.resizeCameraPreview?.(newSize);
     };
 
     const handleMouseUp = () => {
@@ -201,30 +224,34 @@ export function CameraPreviewWindow() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [resizeDirection]);
+  }, [resizeDirection, options.shape]);
 
   const isResizing = resizeDirection !== null;
 
   return (
     <div 
-      className="w-full h-full cursor-move"
+      className="cursor-move"
       onMouseDown={handleMouseDown}
       style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         WebkitAppRegion: 'drag',
+        background: 'transparent',
       } as React.CSSProperties}
     >
       <div
-        className="overflow-hidden relative"
         style={{
-          // Use min dimension to ensure perfect circle/square
-          width: '100%',
-          height: '100%',
-          aspectRatio: '1 / 1',
-          maxWidth: '100%',
-          maxHeight: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
           borderRadius: options.shape === 'circle' ? '50%' : '12px',
           border: options.recording ? '3px solid rgba(239, 68, 68, 0.9)' : '3px solid rgba(255, 255, 255, 0.8)',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+          overflow: 'hidden',
         }}
       >
         <video
@@ -233,9 +260,13 @@ export function CameraPreviewWindow() {
           muted
           playsInline
           style={{ 
+            position: 'absolute',
+            top: 0,
+            left: 0,
             width: '100%',
             height: '100%',
             objectFit: 'cover',
+            objectPosition: 'center center',
             transform: 'scaleX(-1)',
           }}
         />
@@ -249,8 +280,16 @@ export function CameraPreviewWindow() {
       </div>
       {isDragging && (
         <div 
-          className="absolute inset-0 flex items-center justify-center bg-black/40"
           style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(0,0,0,0.4)',
             borderRadius: options.shape === 'circle' ? '50%' : '12px',
           }}
         >
@@ -261,52 +300,120 @@ export function CameraPreviewWindow() {
       {/* Resize handles - all edges and corners */}
       {/* Edge handles */}
       <div
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-2 cursor-n-resize"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 32,
+          height: 8,
+          cursor: 'n-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('n')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       <div
-        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-2 cursor-s-resize"
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 32,
+          height: 8,
+          cursor: 's-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('s')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       <div
-        className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-8 cursor-w-resize"
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          width: 8,
+          height: 32,
+          cursor: 'w-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('w')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       <div
-        className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-8 cursor-e-resize"
+        style={{
+          position: 'absolute',
+          right: 0,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          width: 8,
+          height: 32,
+          cursor: 'e-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('e')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       
       {/* Corner handles */}
       <div
-        className="absolute top-0 left-0 w-4 h-4 cursor-nw-resize"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: 16,
+          height: 16,
+          cursor: 'nw-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('nw')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       <div
-        className="absolute top-0 right-0 w-4 h-4 cursor-ne-resize"
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          width: 16,
+          height: 16,
+          cursor: 'ne-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('ne')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       <div
-        className="absolute bottom-0 left-0 w-4 h-4 cursor-sw-resize"
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          width: 16,
+          height: 16,
+          cursor: 'sw-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('sw')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       <div
-        className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          right: 0,
+          width: 16,
+          height: 16,
+          cursor: 'se-resize',
+          WebkitAppRegion: 'no-drag',
+        } as React.CSSProperties}
         onMouseDown={handleResizeMouseDown('se')}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       />
       
       {isResizing && (
         <div 
-          className="absolute inset-0 flex items-center justify-center bg-black/40"
           style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(0,0,0,0.4)',
             borderRadius: options.shape === 'circle' ? '50%' : '12px',
           }}
         >

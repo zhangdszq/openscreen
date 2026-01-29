@@ -130,3 +130,23 @@ function clamp(value: number, min: number, max: number) {
   if (Number.isNaN(value)) return (min + max) / 2;
   return Math.min(max, Math.max(min, value));
 }
+
+// Mouse tracking types for auto-zoom feature
+export type MouseButtonType = 'left' | 'right' | 'middle';
+
+export interface RecordedMouseEvent {
+  id: string;
+  timestampMs: number;  // relative to recording start
+  x: number;            // normalized coordinate 0-1
+  y: number;            // normalized coordinate 0-1
+  type: 'click' | 'move';
+  button?: MouseButtonType;
+}
+
+export interface MouseTrackData {
+  events: RecordedMouseEvent[];
+  screenBounds: { width: number; height: number };
+}
+
+export const DEFAULT_CLICK_ZOOM_DURATION_MS = 2000; // total duration of zoom for a click
+export const DEFAULT_CLICK_ZOOM_LEAD_MS = 300;      // start zoom this many ms before click

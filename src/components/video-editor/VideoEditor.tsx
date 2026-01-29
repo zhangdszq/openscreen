@@ -20,6 +20,8 @@ import {
   DEFAULT_ANNOTATION_SIZE,
   DEFAULT_ANNOTATION_STYLE,
   DEFAULT_FIGURE_DATA,
+  DEFAULT_CLICK_ZOOM_DURATION_MS,
+  DEFAULT_CLICK_ZOOM_LEAD_MS,
   type ZoomDepth,
   type ZoomFocus,
   type ZoomRegion,
@@ -27,6 +29,8 @@ import {
   type AnnotationRegion,
   type CropRegion,
   type FigureData,
+  type RecordedMouseEvent,
+  type MouseTrackData,
 } from "./types";
 import { VideoExporter, GifExporter, type ExportProgress, type ExportQuality, type ExportSettings, type ExportFormat, type GifFrameRate, type GifSizePreset, GIF_SIZE_PRESETS, calculateOutputDimensions } from "@/lib/exporter";
 import { type AspectRatio, getAspectRatioValue } from "@/utils/aspectRatioUtils";
@@ -65,6 +69,7 @@ export default function VideoEditor() {
   const [gifFrameRate, setGifFrameRate] = useState<GifFrameRate>(15);
   const [gifLoop, setGifLoop] = useState(true);
   const [gifSizePreset, setGifSizePreset] = useState<GifSizePreset>('medium');
+  const [mouseClickEvents, setMouseClickEvents] = useState<RecordedMouseEvent[]>([]);
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
   const nextZoomIdRef = useRef(1);
@@ -97,6 +102,22 @@ export default function VideoEditor() {
         if (result.success && result.path) {
           const videoUrl = toFileUrl(result.path);
           setVideoPath(videoUrl);
+          
+          // Try to load mouse events data
+          if (window.electronAPI.loadMouseEvents) {
+            try {
+              const mouseResult = await window.electronAPI.loadMouseEvents(result.path);
+              if (mouseResult.success && mouseResult.data) {
+                const mouseData = mouseResult.data as MouseTrackData;
+                // Filter to only click events
+                const clickEvents = mouseData.events.filter(e => e.type === 'click');
+                setMouseClickEvents(clickEvents);
+                console.log(`Loaded ${clickEvents.length} mouse click events`);
+              }
+            } catch (mouseErr) {
+              console.log('No mouse events data found for this video');
+            }
+          }
         } else {
           setError('No video to load. Please record or select a video.');
         }
@@ -386,6 +407,69 @@ export default function VideoEditor() {
       ),
     );
   }, []);
+
+  // Auto-generate zoom regions from mouse click events
+  const handleAutoZoomFromClicks = useCallback(() => {
+    if (mouseClickEvents.length === 0) {
+      toast.info('No mouse click events available');
+      return;
+    }
+
+    const durationMs = Math.round(duration * 1000);
+    if (durationMs <= 0) {
+      toast.error('Video not loaded');
+      return;
+    }
+
+    // Filter existing zoom regions to check for overlaps
+    const existingZooms = [...zoomRegions].sort((a, b) => a.startMs - b.startMs);
+    
+    let addedCount = 0;
+    const newZoomRegions: ZoomRegion[] = [];
+
+    for (const clickEvent of mouseClickEvents) {
+      // Calculate zoom region timing
+      const zoomStartMs = Math.max(0, clickEvent.timestampMs - DEFAULT_CLICK_ZOOM_LEAD_MS);
+      const zoomEndMs = Math.min(durationMs, clickEvent.timestampMs + DEFAULT_CLICK_ZOOM_DURATION_MS - DEFAULT_CLICK_ZOOM_LEAD_MS);
+
+      // Skip if duration is too short
+      if (zoomEndMs - zoomStartMs < 100) continue;
+
+      // Check for overlap with existing zoom regions
+      const hasOverlap = existingZooms.some(
+        (z) => !(zoomEndMs <= z.startMs || zoomStartMs >= z.endMs)
+      );
+
+      if (hasOverlap) continue;
+
+      // Check for overlap with newly added zoom regions
+      const hasNewOverlap = newZoomRegions.some(
+        (z) => !(zoomEndMs <= z.startMs || zoomStartMs >= z.endMs)
+      );
+
+      if (hasNewOverlap) continue;
+
+      // Create new zoom region
+      const id = `zoom-${nextZoomIdRef.current++}`;
+      const newRegion: ZoomRegion = {
+        id,
+        startMs: Math.round(zoomStartMs),
+        endMs: Math.round(zoomEndMs),
+        depth: DEFAULT_ZOOM_DEPTH,
+        focus: { cx: clickEvent.x, cy: clickEvent.y },
+      };
+
+      newZoomRegions.push(newRegion);
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      setZoomRegions((prev) => [...prev, ...newZoomRegions]);
+      toast.success(`Added ${addedCount} zoom regions from clicks`);
+    } else {
+      toast.info('No new zoom regions could be added (all positions overlap with existing)');
+    }
+  }, [mouseClickEvents, duration, zoomRegions]);
   
   // Global Tab prevention
   useEffect(() => {
@@ -831,6 +915,8 @@ export default function VideoEditor() {
               onSelectAnnotation={handleSelectAnnotation}
               aspectRatio={aspectRatio}
               onAspectRatioChange={setAspectRatio}
+              mouseClickEvents={mouseClickEvents}
+              onAutoZoomFromClicks={handleAutoZoomFromClicks}
             />
               </div>
             </Panel>

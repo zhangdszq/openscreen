@@ -76,6 +76,9 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   resizeCameraPreview: (newSize) => {
     return electron.ipcRenderer.invoke("resize-camera-preview", newSize);
   },
+  resizeCameraPreviewRect: (newWidth, newHeight) => {
+    return electron.ipcRenderer.invoke("resize-camera-preview-rect", newWidth, newHeight);
+  },
   positionCameraPreviewInArea: (options) => {
     return electron.ipcRenderer.invoke("position-camera-preview-in-area", options);
   },
@@ -94,5 +97,30 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
     const listener = (_, options) => callback(options);
     electron.ipcRenderer.on("camera-preview-update", listener);
     return () => electron.ipcRenderer.removeListener("camera-preview-update", listener);
+  },
+  // Mouse tracking APIs
+  startMouseTracking: (bounds) => {
+    return electron.ipcRenderer.invoke("start-mouse-tracking", bounds);
+  },
+  checkAccessibilityPermission: () => {
+    return electron.ipcRenderer.invoke("check-accessibility-permission");
+  },
+  requestAccessibilityPermission: () => {
+    return electron.ipcRenderer.invoke("request-accessibility-permission");
+  },
+  stopMouseTracking: () => {
+    return electron.ipcRenderer.invoke("stop-mouse-tracking");
+  },
+  isMouseTracking: () => {
+    return electron.ipcRenderer.invoke("is-mouse-tracking");
+  },
+  recordMouseClick: (button = "left") => {
+    return electron.ipcRenderer.invoke("record-mouse-click", button);
+  },
+  saveMouseEvents: (mouseData, fileName) => {
+    return electron.ipcRenderer.invoke("save-mouse-events", mouseData, fileName);
+  },
+  loadMouseEvents: (videoPath) => {
+    return electron.ipcRenderer.invoke("load-mouse-events", videoPath);
   }
 });

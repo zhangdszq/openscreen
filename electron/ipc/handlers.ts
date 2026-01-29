@@ -3,6 +3,7 @@ import { ipcMain, desktopCapturer, BrowserWindow, shell, app, dialog } from 'ele
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { RECORDINGS_DIR } from '../main'
+import { startTracking, stopTracking, isCurrentlyTracking, recordClick, checkAccessibilityPermission, requestAccessibilityPermission, type RecordingBounds, type MouseTrackData } from '../mouseTracker'
 
 let selectedSource: any = null
 
@@ -216,5 +217,73 @@ export function registerIpcHandlers(
 
   ipcMain.handle('get-platform', () => {
     return process.platform;
+  });
+
+  // Mouse tracking handlers
+  ipcMain.handle('start-mouse-tracking', async (_, bounds: RecordingBounds) => {
+    try {
+      const result = await startTracking(bounds);
+      return result;
+    } catch (error) {
+      console.error('Failed to start mouse tracking:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('check-accessibility-permission', async () => {
+    return await checkAccessibilityPermission();
+  });
+
+  ipcMain.handle('request-accessibility-permission', async () => {
+    return await requestAccessibilityPermission();
+  });
+
+  ipcMain.handle('stop-mouse-tracking', () => {
+    try {
+      const data = stopTracking();
+      return { success: true, data };
+    } catch (error) {
+      console.error('Failed to stop mouse tracking:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('is-mouse-tracking', () => {
+    return isCurrentlyTracking();
+  });
+
+  ipcMain.handle('record-mouse-click', (_, button: 'left' | 'right' | 'middle' = 'left') => {
+    try {
+      recordClick(button);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to record mouse click:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('save-mouse-events', async (_, mouseData: MouseTrackData, fileName: string) => {
+    try {
+      const filePath = path.join(RECORDINGS_DIR, fileName);
+      await fs.writeFile(filePath, JSON.stringify(mouseData, null, 2));
+      return { success: true, path: filePath };
+    } catch (error) {
+      console.error('Failed to save mouse events:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('load-mouse-events', async (_, videoPath: string) => {
+    try {
+      // Try to find mouse events file matching the video
+      const mouseFilePath = videoPath.replace(/\.[^.]+$/, '.mouse.json');
+      const data = await fs.readFile(mouseFilePath, 'utf-8');
+      const mouseData: MouseTrackData = JSON.parse(data);
+      return { success: true, data: mouseData };
+    } catch (error) {
+      // It's normal for mouse events file to not exist
+      console.log('No mouse events file found for video');
+      return { success: false, error: 'No mouse events file found' };
+    }
   });
 }

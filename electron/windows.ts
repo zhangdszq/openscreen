@@ -65,7 +65,7 @@ ipcMain.handle('update-camera-preview', (_, options: {
   return { success: true };
 });
 
-// Resize camera preview window (called from renderer during drag resize)
+// Resize camera preview window (called from renderer during drag resize) - for circle (uniform)
 ipcMain.handle('resize-camera-preview', (_, newSize: number) => {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
     const pixelSize = Math.round(newSize);
@@ -83,6 +83,30 @@ ipcMain.handle('resize-camera-preview', (_, newSize: number) => {
       y: newY,
       width: pixelSize,
       height: pixelSize,
+    });
+  }
+  return { success: true };
+});
+
+// Resize camera preview window with independent width/height (for rectangle)
+ipcMain.handle('resize-camera-preview-rect', (_, newWidth: number, newHeight: number) => {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    const width = Math.round(newWidth);
+    const height = Math.round(newHeight);
+    const bounds = cameraPreviewWindow.getBounds();
+    
+    // Keep the window centered at its current position during resize
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    
+    const newX = Math.round(centerX - width / 2);
+    const newY = Math.round(centerY - height / 2);
+    
+    cameraPreviewWindow.setBounds({
+      x: newX,
+      y: newY,
+      width,
+      height,
     });
   }
   return { success: true };
@@ -178,8 +202,8 @@ function updateCameraPreviewWindow(options: {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { workArea } = primaryDisplay;
     
-    // Calculate size based on percentage (relative to a base of 300px)
-    const pixelSize = options.size ? Math.max(100, Math.round((options.size / 100) * 400)) : 150;
+    // Calculate size based on percentage of screen width (max 200px, consistent with recording)
+    const pixelSize = options.size ? Math.max(80, Math.min(200, Math.round((options.size / 100) * workArea.width))) : 150;
     const height = options.shape === 'rectangle' ? Math.round(pixelSize * 0.75) : pixelSize;
     
     // Calculate position
@@ -402,8 +426,8 @@ export function createCameraPreviewWindow(options: {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { workArea } = primaryDisplay;
   
-  // Calculate size based on percentage
-  const pixelSize = Math.max(100, Math.round((options.size / 100) * 400));
+  // Calculate size based on percentage of screen width (max 200px, consistent with recording)
+  const pixelSize = Math.max(80, Math.min(200, Math.round((options.size / 100) * workArea.width)));
   const height = options.shape === 'rectangle' ? Math.round(pixelSize * 0.75) : pixelSize;
   
   // Calculate position

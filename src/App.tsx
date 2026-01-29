@@ -16,6 +16,11 @@ export default function App() {
       document.documentElement.style.background = 'transparent';
       document.getElementById('root')?.style.setProperty('background', 'transparent');
     }
+    // Add special class for camera preview to ensure full transparency and no scrollbars
+    if (type === 'camera-preview') {
+      document.body.classList.add('camera-preview-window');
+      document.documentElement.classList.add('camera-preview-window');
+    }
   }, []);
 
   switch (windowType) {

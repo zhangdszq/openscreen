@@ -4,6 +4,7 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, closeCameraPreviewWindow } from './windows'
 import { registerIpcHandlers } from './ipc/handlers'
+import { cleanup as cleanupMouseTracker } from './mouseTracker'
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -126,9 +127,10 @@ app.on('window-all-closed', () => {
   // Keep app running (macOS behavior)
 })
 
-// Close camera preview window before app quits
+// Close camera preview window and cleanup before app quits
 app.on('before-quit', () => {
   closeCameraPreviewWindow();
+  cleanupMouseTracker();
 })
 
 app.on('activate', () => {

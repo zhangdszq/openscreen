@@ -1,7 +1,8 @@
-import { ipcMain, screen, BrowserWindow, desktopCapturer, shell, app, dialog, nativeImage, Tray, Menu } from "electron";
+import { ipcMain, screen, BrowserWindow, systemPreferences, dialog, desktopCapturer, shell, app, nativeImage, Tray, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.join(__dirname$1, "..");
 const VITE_DEV_SERVER_URL$1 = process.env["VITE_DEV_SERVER_URL"];
@@ -57,6 +58,24 @@ ipcMain.handle("resize-camera-preview", (_, newSize) => {
       y: newY,
       width: pixelSize,
       height: pixelSize
+    });
+  }
+  return { success: true };
+});
+ipcMain.handle("resize-camera-preview-rect", (_, newWidth, newHeight) => {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    const width = Math.round(newWidth);
+    const height = Math.round(newHeight);
+    const bounds = cameraPreviewWindow.getBounds();
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    const newX = Math.round(centerX - width / 2);
+    const newY = Math.round(centerY - height / 2);
+    cameraPreviewWindow.setBounds({
+      x: newX,
+      y: newY,
+      width,
+      height
     });
   }
   return { success: true };
@@ -120,7 +139,7 @@ function updateCameraPreviewWindow(options) {
   if (options.size !== void 0 || options.shape !== void 0 || options.position !== void 0) {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { workArea } = primaryDisplay;
-    const pixelSize = options.size ? Math.max(100, Math.round(options.size / 100 * 400)) : 150;
+    const pixelSize = options.size ? Math.max(80, Math.min(200, Math.round(options.size / 100 * workArea.width))) : 150;
     const height = options.shape === "rectangle" ? Math.round(pixelSize * 0.75) : pixelSize;
     const padding = 20;
     let x, y;
@@ -294,7 +313,7 @@ function createSourceSelectorWindow() {
 function createCameraPreviewWindow(options) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { workArea } = primaryDisplay;
-  const pixelSize = Math.max(100, Math.round(options.size / 100 * 400));
+  const pixelSize = Math.max(80, Math.min(200, Math.round(options.size / 100 * workArea.width)));
   const height = options.shape === "rectangle" ? Math.round(pixelSize * 0.75) : pixelSize;
   const padding = 20;
   let x, y;
@@ -360,6 +379,172 @@ function createCameraPreviewWindow(options) {
     }
   });
   return win;
+}
+const require2 = createRequire(import.meta.url);
+const { uIOhook } = require2("uiohook-napi");
+let isTracking = false;
+let events = [];
+let startTime = 0;
+let recordingBounds = null;
+let eventCounter = 0;
+let hookStarted = false;
+function generateEventId() {
+  return `mouse-${Date.now()}-${eventCounter++}`;
+}
+function normalizeCoordinates(screenX, screenY) {
+  if (!recordingBounds) return null;
+  const x = (screenX - recordingBounds.x) / recordingBounds.width;
+  const y = (screenY - recordingBounds.y) / recordingBounds.height;
+  if (x < -0.1 || x > 1.1 || y < -0.1 || y > 1.1) {
+    return null;
+  }
+  return {
+    x: Math.max(0, Math.min(1, x)),
+    y: Math.max(0, Math.min(1, y))
+  };
+}
+function getButtonName(button) {
+  switch (button) {
+    case 1:
+      return "left";
+    case 2:
+      return "right";
+    case 3:
+      return "middle";
+    default:
+      return "left";
+  }
+}
+function handleMouseClick(event) {
+  if (!isTracking || !recordingBounds) return;
+  const normalized = normalizeCoordinates(event.x, event.y);
+  if (!normalized) return;
+  const timestampMs = Date.now() - startTime;
+  events.push({
+    id: generateEventId(),
+    timestampMs,
+    x: normalized.x,
+    y: normalized.y,
+    type: "click",
+    button: getButtonName(event.button)
+  });
+  console.log(`Mouse tracker: ${getButtonName(event.button)} click at (${normalized.x.toFixed(3)}, ${normalized.y.toFixed(3)}) at ${timestampMs}ms`);
+}
+async function checkAccessibilityPermission() {
+  if (process.platform !== "darwin") {
+    return true;
+  }
+  const isTrusted = systemPreferences.isTrustedAccessibilityClient(false);
+  return isTrusted;
+}
+async function requestAccessibilityPermission() {
+  if (process.platform !== "darwin") {
+    return true;
+  }
+  if (systemPreferences.isTrustedAccessibilityClient(false)) {
+    return true;
+  }
+  const result = await dialog.showMessageBox({
+    type: "info",
+    title: "需要辅助功能权限",
+    message: "为了追踪鼠标点击，需要授予辅助功能权限",
+    detail: '点击"打开设置"后，请在「隐私与安全性 → 辅助功能」中勾选此应用。',
+    buttons: ["打开设置", "取消"],
+    defaultId: 0
+  });
+  if (result.response === 0) {
+    systemPreferences.isTrustedAccessibilityClient(true);
+  }
+  return systemPreferences.isTrustedAccessibilityClient(false);
+}
+function setupHook() {
+  if (hookStarted) return;
+  uIOhook.on("mousedown", handleMouseClick);
+  try {
+    uIOhook.start();
+    hookStarted = true;
+    console.log("Mouse tracker: Global hook started successfully");
+  } catch (error) {
+    console.error("Mouse tracker: Failed to start global hook:", error);
+    throw error;
+  }
+}
+function stopHook() {
+  if (!hookStarted) return;
+  try {
+    uIOhook.stop();
+    hookStarted = false;
+    console.log("Mouse tracker: Global hook stopped");
+  } catch (error) {
+    console.warn("Mouse tracker: Error stopping hook:", error);
+  }
+}
+async function startTracking(bounds) {
+  if (isTracking) {
+    console.warn("Mouse tracker: Already tracking, stopping previous session");
+    stopTracking();
+  }
+  if (process.platform === "darwin") {
+    const hasPermission = await checkAccessibilityPermission();
+    if (!hasPermission) {
+      const granted = await requestAccessibilityPermission();
+      if (!granted) {
+        return {
+          success: false,
+          error: "需要辅助功能权限才能追踪鼠标点击。请在系统设置中授权。"
+        };
+      }
+    }
+  }
+  console.log("Mouse tracker: Starting tracking with bounds:", bounds);
+  try {
+    setupHook();
+  } catch (error) {
+    return {
+      success: false,
+      error: `无法启动鼠标监听: ${error}`
+    };
+  }
+  isTracking = true;
+  recordingBounds = bounds;
+  startTime = Date.now();
+  events = [];
+  eventCounter = 0;
+  return { success: true };
+}
+function stopTracking() {
+  console.log("Mouse tracker: Stopping tracking");
+  isTracking = false;
+  const result = {
+    events: [...events],
+    screenBounds: recordingBounds ? { width: recordingBounds.width, height: recordingBounds.height } : { width: 0, height: 0 }
+  };
+  console.log(`Mouse tracker: Captured ${result.events.length} click events`);
+  events = [];
+  recordingBounds = null;
+  return result;
+}
+function isCurrentlyTracking() {
+  return isTracking;
+}
+function cleanup() {
+  stopHook();
+}
+function recordClick(button = "left") {
+  if (!isTracking || !recordingBounds) return;
+  const point = screen.getCursorScreenPoint();
+  const normalized = normalizeCoordinates(point.x, point.y);
+  if (!normalized) return;
+  const timestampMs = Date.now() - startTime;
+  events.push({
+    id: generateEventId(),
+    timestampMs,
+    x: normalized.x,
+    y: normalized.y,
+    type: "click",
+    button
+  });
+  console.log(`Mouse tracker: Manual ${button} click recorded at (${normalized.x.toFixed(3)}, ${normalized.y.toFixed(3)}) at ${timestampMs}ms`);
 }
 let selectedSource = null;
 function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, getMainWindow, getSourceSelectorWindow, onRecordingStateChange) {
@@ -533,6 +718,63 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
   ipcMain.handle("get-platform", () => {
     return process.platform;
   });
+  ipcMain.handle("start-mouse-tracking", async (_, bounds) => {
+    try {
+      const result = await startTracking(bounds);
+      return result;
+    } catch (error) {
+      console.error("Failed to start mouse tracking:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("check-accessibility-permission", async () => {
+    return await checkAccessibilityPermission();
+  });
+  ipcMain.handle("request-accessibility-permission", async () => {
+    return await requestAccessibilityPermission();
+  });
+  ipcMain.handle("stop-mouse-tracking", () => {
+    try {
+      const data = stopTracking();
+      return { success: true, data };
+    } catch (error) {
+      console.error("Failed to stop mouse tracking:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("is-mouse-tracking", () => {
+    return isCurrentlyTracking();
+  });
+  ipcMain.handle("record-mouse-click", (_, button = "left") => {
+    try {
+      recordClick(button);
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to record mouse click:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("save-mouse-events", async (_, mouseData, fileName) => {
+    try {
+      const filePath = path.join(RECORDINGS_DIR, fileName);
+      await fs.writeFile(filePath, JSON.stringify(mouseData, null, 2));
+      return { success: true, path: filePath };
+    } catch (error) {
+      console.error("Failed to save mouse events:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("load-mouse-events", async (_, videoPath) => {
+    try {
+      const mouseFilePath = videoPath.replace(/\.[^.]+$/, ".mouse.json");
+      const data = await fs.readFile(mouseFilePath, "utf-8");
+      const mouseData = JSON.parse(data);
+      return { success: true, data: mouseData };
+    } catch (error) {
+      console.log("No mouse events file found for video");
+      return { success: false, error: "No mouse events file found" };
+    }
+  });
 }
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECORDINGS_DIR = path.join(app.getPath("userData"), "recordings");
@@ -622,6 +864,7 @@ app.on("window-all-closed", () => {
 });
 app.on("before-quit", () => {
   closeCameraPreviewWindow();
+  cleanup();
 });
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
