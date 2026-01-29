@@ -829,14 +829,22 @@ export default function TimelineEditor({
           }
         }
       }    
-      if ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey)) {
+      // Delete with Ctrl/Cmd+D, Delete key, or Backspace
+      if (
+        ((e.key === 'd' || e.key === 'D') && (e.ctrlKey || e.metaKey)) ||
+        e.key === 'Delete' ||
+        e.key === 'Backspace'
+      ) {
         if (selectedKeyframeId) {
           deleteSelectedKeyframe();
         } else if (selectedZoomId) {
+          e.preventDefault();
           deleteSelectedZoom();
         } else if (selectedTrimId) {
+          e.preventDefault();
           deleteSelectedTrim();
         } else if (selectedAnnotationId) {
+          e.preventDefault();
           deleteSelectedAnnotation();
         }
       }
