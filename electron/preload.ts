@@ -133,6 +133,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadMouseEvents: (videoPath: string) => {
     return ipcRenderer.invoke('load-mouse-events', videoPath)
   },
+  checkFileExists: (filePath: string) => {
+    return ipcRenderer.invoke('check-file-exists', filePath)
+  },
+
+  // Region Selection APIs
+  openRegionSelector: () => {
+    return ipcRenderer.invoke('open-region-selector')
+  },
+  confirmRegionSelection: (region: { x: number; y: number; width: number; height: number }) => {
+    return ipcRenderer.invoke('confirm-region-selection', region)
+  },
+  cancelRegionSelection: () => {
+    return ipcRenderer.invoke('cancel-region-selection')
+  },
+  saveRegionInfo: (regionInfo: { x: number; y: number; width: number; height: number }, fileName: string) => {
+    return ipcRenderer.invoke('save-region-info', regionInfo, fileName)
+  },
+  loadRegionInfo: (videoPath: string) => {
+    return ipcRenderer.invoke('load-region-info', videoPath)
+  },
+  getScreenForRegion: (region: { x: number; y: number; width: number; height: number }) => {
+    return ipcRenderer.invoke('get-screen-for-region', region)
+  },
 
   // Pro Feature APIs - Keyframes and Flow Graph
   saveKeyframeImage: (imageData: string, fileName: string) => {

@@ -287,6 +287,80 @@ export function registerIpcHandlers(
     }
   });
 
+  ipcMain.handle('check-file-exists', async (_, filePath: string) => {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle('save-region-info', async (_, regionInfo: { x: number; y: number; width: number; height: number }, fileName: string) => {
+    try {
+      const filePath = path.join(RECORDINGS_DIR, fileName);
+      await fs.writeFile(filePath, JSON.stringify(regionInfo, null, 2));
+      return { success: true, path: filePath };
+    } catch (error) {
+      console.error('Failed to save region info:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('load-region-info', async (_, videoPath: string) => {
+    try {
+      const regionFilePath = videoPath.replace(/\.[^.]+$/, '.region.json');
+      const data = await fs.readFile(regionFilePath, 'utf-8');
+      const regionInfo = JSON.parse(data);
+      return { success: true, data: regionInfo };
+    } catch {
+      return { success: false, error: 'No region info found' };
+    }
+  });
+
+  ipcMain.handle('get-screen-for-region', async (_, region: { x: number; y: number; width: number; height: number }) => {
+    try {
+      const { screen } = await import('electron');
+      const displays = screen.getAllDisplays();
+      
+      // Find the display that contains the center of the region
+      const centerX = region.x + region.width / 2;
+      const centerY = region.y + region.height / 2;
+      
+      for (const display of displays) {
+        const { x, y, width, height } = display.bounds;
+        if (centerX >= x && centerX < x + width && centerY >= y && centerY < y + height) {
+          // Get sources to find the screen ID
+          const sources = await desktopCapturer.getSources({ types: ['screen'] });
+          const matchingSource = sources.find(s => s.display_id === String(display.id));
+          if (matchingSource) {
+            return { 
+              success: true, 
+              screenId: matchingSource.id,
+              displayBounds: display.bounds
+            };
+          }
+        }
+      }
+      
+      // Fallback to primary display
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const sources = await desktopCapturer.getSources({ types: ['screen'] });
+      if (sources.length > 0) {
+        return { 
+          success: true, 
+          screenId: sources[0].id,
+          displayBounds: primaryDisplay.bounds
+        };
+      }
+      
+      return { success: false, error: 'No screen found for region' };
+    } catch (error) {
+      console.error('Failed to get screen for region:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
   // ============================================================================
   // Pro Feature Handlers - Keyframes and Flow Graph
   // ============================================================================

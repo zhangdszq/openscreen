@@ -337,3 +337,43 @@ export function createEmptyFlowGraph(name: string = '未命名流程图'): FlowG
     viewport: { ...DEFAULT_FLOW_VIEWPORT },
   };
 }
+
+// ============================================================================
+// Camera Overlay (Picture-in-Picture) Types
+// ============================================================================
+
+export type CameraOverlayShape = 'circle' | 'rectangle';
+export type CameraOverlayPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'custom';
+
+/**
+ * Camera overlay settings for picture-in-picture effect
+ */
+export interface CameraOverlay {
+  /** Whether camera overlay is enabled */
+  enabled: boolean;
+  /** Path to camera video file */
+  videoPath: string;
+  /** Position (normalized 0-1, relative to video dimensions) */
+  position: { x: number; y: number };
+  /** Size as percentage of video width (5-50%) */
+  size: number;
+  /** Shape of the camera overlay */
+  shape: CameraOverlayShape;
+  /** Opacity (0-1) */
+  opacity: number;
+  /** Border style */
+  borderStyle: 'none' | 'white' | 'shadow';
+}
+
+/**
+ * Default camera overlay settings
+ */
+export const DEFAULT_CAMERA_OVERLAY: CameraOverlay = {
+  enabled: false,
+  videoPath: '',
+  position: { x: 0.95, y: 0.95 }, // Bottom-right by default
+  size: 15, // 15% of video width
+  shape: 'circle',
+  opacity: 1,
+  borderStyle: 'shadow',
+};

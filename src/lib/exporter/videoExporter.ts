@@ -3,7 +3,7 @@ import { VideoFileDecoder } from './videoDecoder';
 import { FrameRenderer } from './frameRenderer';
 import { VideoMuxer } from './muxer';
 import { AudioExtractor } from './audioExtractor';
-import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion } from '@/components/video-editor/types';
+import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion, CameraOverlay } from '@/components/video-editor/types';
 
 interface VideoExporterConfig extends ExportConfig {
   videoUrl: string;
@@ -21,12 +21,14 @@ interface VideoExporterConfig extends ExportConfig {
   annotationRegions?: AnnotationRegion[];
   previewWidth?: number;
   previewHeight?: number;
+  cameraOverlay?: CameraOverlay;
   onProgress?: (progress: ExportProgress) => void;
 }
 
 export class VideoExporter {
   private config: VideoExporterConfig;
   private decoder: VideoFileDecoder | null = null;
+  private cameraDecoder: VideoFileDecoder | null = null;
   private renderer: FrameRenderer | null = null;
   private encoder: VideoEncoder | null = null;
   private muxer: VideoMuxer | null = null;
@@ -41,6 +43,9 @@ export class VideoExporter {
   private muxingPromises: Promise<void>[] = [];
   private chunkCount = 0;
   private hasAudio = false;
+  // Camera overlay canvas for compositing
+  private cameraCanvas: HTMLCanvasElement | null = null;
+  private cameraCtx: CanvasRenderingContext2D | null = null;
 
   constructor(config: VideoExporterConfig) {
     this.config = config;
@@ -105,6 +110,36 @@ export class VideoExporter {
         previewHeight: this.config.previewHeight,
       });
       await this.renderer.initialize();
+
+      // Initialize camera decoder if camera overlay is enabled
+      let cameraVideoElement: HTMLVideoElement | null = null;
+      if (this.config.cameraOverlay?.enabled && this.config.cameraOverlay.videoPath) {
+        try {
+          this.cameraDecoder = new VideoFileDecoder();
+          const cameraUrl = this.config.cameraOverlay.videoPath.startsWith('file://')
+            ? this.config.cameraOverlay.videoPath
+            : `file:///${this.config.cameraOverlay.videoPath.replace(/\\/g, '/')}`;
+          await this.cameraDecoder.loadVideo(cameraUrl);
+          cameraVideoElement = this.cameraDecoder.getVideoElement();
+          
+          // Create camera canvas for compositing - use smaller size for better performance
+          this.cameraCanvas = document.createElement('canvas');
+          this.cameraCanvas.width = this.config.width;
+          this.cameraCanvas.height = this.config.height;
+          this.cameraCtx = this.cameraCanvas.getContext('2d', { 
+            alpha: false,
+            desynchronized: true // Improves performance
+          });
+          
+          // Pre-seek camera video to start
+          cameraVideoElement.currentTime = 0;
+          
+          console.log('[VideoExporter] Camera video loaded for compositing');
+        } catch (error) {
+          console.warn('[VideoExporter] Failed to load camera video:', error);
+          this.cameraDecoder = null;
+        }
+      }
 
       // Start audio extraction in parallel (don't await yet)
       this.audioExtractor = new AudioExtractor({
@@ -172,21 +207,28 @@ export class VideoExporter {
         const sourceTimeMs = this.mapEffectiveToSourceTime(effectiveTimeMs);
         const videoTime = sourceTimeMs / 1000;
           
-        // Seek if needed or wait for first frame to be ready
+        // Seek to the correct time and wait for frame to be ready
         const needsSeek = Math.abs(videoElement.currentTime - videoTime) > 0.001;
 
         if (needsSeek) {
-          // Attach listener BEFORE setting currentTime to avoid race condition
-          const seekedPromise = new Promise<void>(resolve => {
-            videoElement.addEventListener('seeked', () => resolve(), { once: true });
-          });
-          
           videoElement.currentTime = videoTime;
-          await seekedPromise;
-        } else if (i === 0) {
-          // Only for the very first frame, wait for it to be ready
+          // Wait for the frame to be ready using requestVideoFrameCallback
           await new Promise<void>(resolve => {
-            videoElement.requestVideoFrameCallback(() => resolve());
+            if ('requestVideoFrameCallback' in videoElement) {
+              (videoElement as any).requestVideoFrameCallback(() => resolve());
+            } else {
+              // Fallback for browsers without requestVideoFrameCallback
+              videoElement.addEventListener('seeked', () => resolve(), { once: true });
+            }
+          });
+        } else if (i === 0) {
+          // First frame - wait for it to be ready
+          await new Promise<void>(resolve => {
+            if ('requestVideoFrameCallback' in videoElement) {
+              (videoElement as any).requestVideoFrameCallback(() => resolve());
+            } else {
+              setTimeout(resolve, 16);
+            }
           });
         }
 
@@ -203,9 +245,105 @@ export class VideoExporter {
 
         const canvas = this.renderer!.getCanvas();
 
+        // Composite camera overlay if enabled
+        if (cameraVideoElement && this.cameraCtx && this.cameraCanvas && this.config.cameraOverlay) {
+          const overlay = this.config.cameraOverlay;
+          
+          // Sync camera video to main video time
+          const camTimeDiff = Math.abs(cameraVideoElement.currentTime - videoTime);
+          if (camTimeDiff > 0.05) {
+            cameraVideoElement.currentTime = videoTime;
+            // Wait for camera frame using requestVideoFrameCallback
+            await new Promise<void>(resolve => {
+              if ('requestVideoFrameCallback' in cameraVideoElement) {
+                (cameraVideoElement as any).requestVideoFrameCallback(() => resolve());
+              } else {
+                cameraVideoElement.addEventListener('seeked', () => resolve(), { once: true });
+              }
+            });
+          }
+          
+          // Calculate camera overlay dimensions and position
+          const pipWidth = (overlay.size / 100) * this.config.width;
+          const pipHeight = overlay.shape === 'circle' ? pipWidth : pipWidth * 0.75;
+          const pipX = overlay.position.x * this.config.width - pipWidth / 2;
+          const pipY = overlay.position.y * this.config.height - pipHeight / 2;
+          
+          // Clear camera canvas and copy main frame
+          this.cameraCtx.clearRect(0, 0, this.config.width, this.config.height);
+          this.cameraCtx.drawImage(canvas, 0, 0);
+          
+          // Draw camera overlay
+          this.cameraCtx.save();
+          this.cameraCtx.globalAlpha = overlay.opacity;
+          
+          // Create clipping path for shape
+          this.cameraCtx.beginPath();
+          if (overlay.shape === 'circle') {
+            this.cameraCtx.arc(
+              pipX + pipWidth / 2,
+              pipY + pipHeight / 2,
+              pipWidth / 2,
+              0,
+              Math.PI * 2
+            );
+          } else {
+            // Rounded rectangle
+            const radius = 12;
+            this.cameraCtx.roundRect(pipX, pipY, pipWidth, pipHeight, radius);
+          }
+          this.cameraCtx.clip();
+          
+          // Draw camera video (mirrored) with object-fit: cover behavior
+          this.cameraCtx.translate(pipX + pipWidth, pipY);
+          this.cameraCtx.scale(-1, 1);
+          
+          // Calculate source crop to maintain aspect ratio (cover behavior)
+          const srcWidth = cameraVideoElement.videoWidth;
+          const srcHeight = cameraVideoElement.videoHeight;
+          const srcAspect = srcWidth / srcHeight;
+          const dstAspect = pipWidth / pipHeight;
+          
+          let sx = 0, sy = 0, sw = srcWidth, sh = srcHeight;
+          
+          if (srcAspect > dstAspect) {
+            // Source is wider - crop sides
+            sw = srcHeight * dstAspect;
+            sx = (srcWidth - sw) / 2;
+          } else {
+            // Source is taller - crop top/bottom
+            sh = srcWidth / dstAspect;
+            sy = (srcHeight - sh) / 2;
+          }
+          
+          this.cameraCtx.drawImage(cameraVideoElement, sx, sy, sw, sh, 0, 0, pipWidth, pipHeight);
+          
+          this.cameraCtx.restore();
+          
+          // Draw border based on style
+          if (overlay.borderStyle === 'white') {
+            this.cameraCtx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            this.cameraCtx.lineWidth = 3;
+            this.cameraCtx.beginPath();
+            if (overlay.shape === 'circle') {
+              this.cameraCtx.arc(pipX + pipWidth / 2, pipY + pipHeight / 2, pipWidth / 2, 0, Math.PI * 2);
+            } else {
+              this.cameraCtx.roundRect(pipX, pipY, pipWidth, pipHeight, 12);
+            }
+            this.cameraCtx.stroke();
+          } else if (overlay.borderStyle === 'shadow') {
+            // Shadow is complex to render efficiently, skip for now
+          }
+        }
+        
+        // Use camera canvas if we have camera overlay, otherwise use renderer canvas
+        const finalCanvas = (cameraVideoElement && this.cameraCanvas && this.config.cameraOverlay) 
+          ? this.cameraCanvas 
+          : canvas;
+
         // Create VideoFrame from canvas on GPU without reading pixels
         // @ts-ignore - colorSpace not in TypeScript definitions but works at runtime
-        const exportFrame = new VideoFrame(canvas, {
+        const exportFrame = new VideoFrame(finalCanvas, {
           timestamp,
           duration: frameDuration,
           colorSpace: {
@@ -399,6 +537,18 @@ export class VideoExporter {
       }
       this.decoder = null;
     }
+
+    if (this.cameraDecoder) {
+      try {
+        this.cameraDecoder.destroy();
+      } catch (e) {
+        console.warn('Error destroying camera decoder:', e);
+      }
+      this.cameraDecoder = null;
+    }
+
+    this.cameraCanvas = null;
+    this.cameraCtx = null;
 
     if (this.renderer) {
       try {

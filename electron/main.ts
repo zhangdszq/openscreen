@@ -2,7 +2,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, closeCameraPreviewWindow } from './windows'
+import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, closeCameraPreviewWindow, showCameraPreviewWindowIfExists, hideCameraPreviewWindow } from './windows'
 import { registerIpcHandlers } from './ipc/handlers'
 import { cleanup as cleanupMouseTracker } from './mouseTracker'
 
@@ -87,7 +87,10 @@ function updateTrayMenu(recording: boolean = false) {
           label: "Open",
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.isMinimized() && mainWindow.restore();
+              if (mainWindow.isMinimized()) {
+                mainWindow.restore();
+                showCameraPreviewWindowIfExists();
+              }
             } else {
               createWindow();
             }
@@ -167,6 +170,7 @@ app.whenReady().then(async () => {
       updateTrayMenu(recording);
       if (!recording) {
         if (mainWindow) mainWindow.restore();
+        showCameraPreviewWindowIfExists();
       }
     }
   )

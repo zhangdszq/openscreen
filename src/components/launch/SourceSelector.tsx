@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "../ui/button";
 import { MdCheck } from "react-icons/md";
+import { MdCrop } from "react-icons/md";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Card } from "../ui/card";
 import styles from "./SourceSelector.module.css";
@@ -17,6 +18,7 @@ export function SourceSelector() {
   const [sources, setSources] = useState<DesktopSource[]>([]);
   const [selectedSource, setSelectedSource] = useState<DesktopSource | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedRegion, setSelectedRegion] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
     async function fetchSources() {
@@ -51,7 +53,27 @@ export function SourceSelector() {
   const screenSources = sources.filter(s => s.id.startsWith('screen:'));
   const windowSources = sources.filter(s => s.id.startsWith('window:'));
 
-  const handleSourceSelect = (source: DesktopSource) => setSelectedSource(source);
+  const handleSourceSelect = (source: DesktopSource) => {
+    setSelectedSource(source);
+    setSelectedRegion(null); // Clear region when selecting a source
+  };
+  
+  const handleRegionSelect = async () => {
+    // Open region selector and wait for result
+    const region = await window.electronAPI.openRegionSelector?.();
+    if (region) {
+      setSelectedRegion(region);
+      // Create a virtual source for the region
+      setSelectedSource({
+        id: `region:${region.x},${region.y},${region.width},${region.height}`,
+        name: `区域 ${region.width}×${region.height}`,
+        thumbnail: null,
+        display_id: '',
+        appIcon: null
+      });
+    }
+  };
+  
   const handleShare = async () => {
     if (selectedSource) await window.electronAPI.selectSource(selectedSource);
   };
@@ -78,6 +100,31 @@ export function SourceSelector() {
             <div className="h-72 flex flex-col justify-stretch">
             <TabsContent value="screens" className="h-full">
               <div className="grid grid-cols-2 gap-2 h-full overflow-y-auto pr-1 relative">
+                {/* Region selection card */}
+                <Card
+                  className={`${styles.sourceCard} ${selectedSource?.id.startsWith('region:') ? styles.selected : ''} cursor-pointer h-fit p-2 scale-95`}
+                  style={{ margin: 8, width: '90%', maxWidth: 220 }}
+                  onClick={handleRegionSelect}
+                >
+                  <div className="p-1">
+                    <div className="relative mb-1">
+                      <div className="w-full aspect-video bg-zinc-800 rounded border border-dashed border-zinc-600 flex items-center justify-center">
+                        <MdCrop className="w-8 h-8 text-zinc-400" />
+                      </div>
+                      {selectedSource?.id.startsWith('region:') && (
+                        <div className="absolute -top-1 -right-1">
+                          <div className="w-4 h-4 bg-[#34B27B] rounded-full flex items-center justify-center shadow-md">
+                            <MdCheck className={styles.icon} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className={styles.name + " truncate"}>
+                      {selectedRegion ? `区域 ${selectedRegion.width}×${selectedRegion.height}` : '选择区域'}
+                    </div>
+                  </div>
+                </Card>
+                
                 {screenSources.map(source => (
                   <Card
                     key={source.id}

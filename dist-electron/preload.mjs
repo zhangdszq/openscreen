@@ -123,6 +123,28 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   loadMouseEvents: (videoPath) => {
     return electron.ipcRenderer.invoke("load-mouse-events", videoPath);
   },
+  checkFileExists: (filePath) => {
+    return electron.ipcRenderer.invoke("check-file-exists", filePath);
+  },
+  // Region Selection APIs
+  openRegionSelector: () => {
+    return electron.ipcRenderer.invoke("open-region-selector");
+  },
+  confirmRegionSelection: (region) => {
+    return electron.ipcRenderer.invoke("confirm-region-selection", region);
+  },
+  cancelRegionSelection: () => {
+    return electron.ipcRenderer.invoke("cancel-region-selection");
+  },
+  saveRegionInfo: (regionInfo, fileName) => {
+    return electron.ipcRenderer.invoke("save-region-info", regionInfo, fileName);
+  },
+  loadRegionInfo: (videoPath) => {
+    return electron.ipcRenderer.invoke("load-region-info", videoPath);
+  },
+  getScreenForRegion: (region) => {
+    return electron.ipcRenderer.invoke("get-screen-for-region", region);
+  },
   // Pro Feature APIs - Keyframes and Flow Graph
   saveKeyframeImage: (imageData, fileName) => {
     return electron.ipcRenderer.invoke("save-keyframe-image", imageData, fileName);

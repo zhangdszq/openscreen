@@ -21,6 +21,7 @@ import {
   DEFAULT_FIGURE_DATA,
   DEFAULT_CLICK_ZOOM_DURATION_MS,
   DEFAULT_CLICK_ZOOM_LEAD_MS,
+  DEFAULT_CAMERA_OVERLAY,
   type ZoomDepth,
   type ZoomFocus,
   type ZoomRegion,
@@ -30,7 +31,9 @@ import {
   type FigureData,
   type RecordedMouseEvent,
   type MouseTrackData,
+  type CameraOverlay,
 } from "./types";
+import PictureInPicture from "./PictureInPicture";
 import { VideoExporter, GifExporter, type ExportProgress, type ExportQuality, type ExportSettings, type ExportFormat, type GifFrameRate, type GifSizePreset, GIF_SIZE_PRESETS, calculateOutputDimensions } from "@/lib/exporter";
 import { type AspectRatio, getAspectRatioValue } from "@/utils/aspectRatioUtils";
 import { getAssetPath } from "@/lib/assetPath";
@@ -74,6 +77,10 @@ export default function VideoEditor() {
   const [gifLoop, setGifLoop] = useState(true);
   const [gifSizePreset, setGifSizePreset] = useState<GifSizePreset>('medium');
   const [mouseClickEvents, setMouseClickEvents] = useState<RecordedMouseEvent[]>([]);
+  
+  // Camera overlay (picture-in-picture) state
+  const [cameraOverlay, setCameraOverlay] = useState<CameraOverlay>(DEFAULT_CAMERA_OVERLAY);
+  const [cameraVideoPath, setCameraVideoPath] = useState<string | null>(null);
   
   // Pro feature state
   const [showFlowEditor, setShowFlowEditor] = useState(false);
@@ -126,6 +133,49 @@ export default function VideoEditor() {
             } catch (mouseErr) {
               console.log('No mouse events data found for this video');
             }
+          }
+          
+          // Try to load region info (for region recordings)
+          if (window.electronAPI.loadRegionInfo) {
+            try {
+              const regionResult = await window.electronAPI.loadRegionInfo(result.path);
+              if (regionResult.success && regionResult.data) {
+                const region = regionResult.data as { x: number; y: number; width: number; height: number };
+                console.log('Loaded region info:', region);
+                // We'll apply crop after video loads and we know the dimensions
+                // Store it temporarily
+                (window as any).__pendingRegionCrop = region;
+              }
+            } catch (regionErr) {
+              console.log('No region info found for this video');
+            }
+          }
+          
+          // Try to load camera video (recorded separately)
+          const cameraPath = result.path.replace('.webm', '.camera.webm');
+          console.log('Checking for camera video at:', cameraPath);
+          try {
+            // Check if camera video file actually exists
+            const checkFileExists = window.electronAPI.checkFileExists;
+            if (!checkFileExists) {
+              console.log('checkFileExists API not available - please restart the app');
+            } else {
+              const cameraExists = await checkFileExists(cameraPath);
+              console.log('Camera file exists:', cameraExists);
+              if (cameraExists) {
+                setCameraVideoPath(cameraPath);
+                setCameraOverlay(prev => ({
+                  ...prev,
+                  enabled: true,
+                  videoPath: cameraPath,
+                }));
+                console.log('Camera video enabled:', cameraPath);
+              } else {
+                console.log('No camera video found for this recording');
+              }
+            }
+          } catch (cameraErr) {
+            console.log('Error checking camera video:', cameraErr);
           }
         } else {
           setError('No video to load. Please record or select a video.');
@@ -480,6 +530,11 @@ export default function VideoEditor() {
     }
   }, [mouseClickEvents, duration, zoomRegions]);
 
+  // Camera overlay handlers
+  const handleCameraOverlayChange = useCallback((overlay: CameraOverlay) => {
+    setCameraOverlay(overlay);
+  }, []);
+
   // Pro feature handlers
   const handleOpenFlowEditor = useCallback(() => {
     setShowFlowEditor(true);
@@ -715,7 +770,7 @@ export default function VideoEditor() {
           videoUrl: videoPath,
           width: exportWidth,
           height: exportHeight,
-          frameRate: 60,
+          frameRate: 30,
           bitrate,
           codec: 'avc1.640033',
           wallpaper,
@@ -731,6 +786,7 @@ export default function VideoEditor() {
           annotationRegions,
           previewWidth,
           previewHeight,
+          cameraOverlay: cameraOverlay.enabled ? cameraOverlay : undefined,
           onProgress: (progress: ExportProgress) => {
             setExportProgress(progress);
           },
@@ -776,7 +832,7 @@ export default function VideoEditor() {
       setShowExportDialog(false);
       setExportProgress(null);
     }
-  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, annotationRegions, isPlaying, aspectRatio, exportQuality]);
+  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, annotationRegions, isPlaying, aspectRatio, exportQuality, cameraOverlay]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {
@@ -824,11 +880,52 @@ export default function VideoEditor() {
                 {/* Video preview */}
                 <div className="w-full flex justify-center items-center" style={{ flex: '1 1 auto', margin: '6px 0 0' }}>
                   <div className="relative" style={{ width: 'auto', height: '100%', aspectRatio: getAspectRatioValue(aspectRatio), maxWidth: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+                    {/* Camera overlay (picture-in-picture) */}
+                    {cameraOverlay.enabled && cameraOverlay.videoPath && videoPlaybackRef.current?.containerRef?.current && (
+                      <PictureInPicture
+                        overlay={cameraOverlay}
+                        onOverlayChange={handleCameraOverlayChange}
+                        containerWidth={videoPlaybackRef.current.containerRef.current.clientWidth}
+                        containerHeight={videoPlaybackRef.current.containerRef.current.clientHeight}
+                        currentTimeMs={Math.round(currentTime * 1000)}
+                        isPlaying={isPlaying}
+                        videoDurationMs={Math.round(duration * 1000)}
+                      />
+                    )}
                     <VideoPlayback
                       aspectRatio={aspectRatio}
                       ref={videoPlaybackRef}
                       videoPath={videoPath || ''}
-                      onDurationChange={setDuration}
+                      onDurationChange={(dur) => {
+                        setDuration(dur);
+                        // Apply pending region crop if exists
+                        const pendingRegion = (window as any).__pendingRegionCrop;
+                        if (pendingRegion && videoPlaybackRef.current?.video) {
+                          const video = videoPlaybackRef.current.video;
+                          const videoWidth = video.videoWidth;
+                          const videoHeight = video.videoHeight;
+                          
+                          if (videoWidth > 0 && videoHeight > 0) {
+                            // Convert pixel region to normalized crop region (0-1)
+                            const cropX = pendingRegion.x / videoWidth;
+                            const cropY = pendingRegion.y / videoHeight;
+                            const cropWidth = pendingRegion.width / videoWidth;
+                            const cropHeight = pendingRegion.height / videoHeight;
+                            
+                            // Clamp values to valid range
+                            const normalizedCrop = {
+                              x: Math.max(0, Math.min(1, cropX)),
+                              y: Math.max(0, Math.min(1, cropY)),
+                              width: Math.max(0.1, Math.min(1 - Math.max(0, cropX), cropWidth)),
+                              height: Math.max(0.1, Math.min(1 - Math.max(0, cropY), cropHeight)),
+                            };
+                            
+                            console.log('Applying region crop:', normalizedCrop, 'from', pendingRegion, 'video:', videoWidth, 'x', videoHeight);
+                            setCropRegion(normalizedCrop);
+                            delete (window as any).__pendingRegionCrop;
+                          }
+                        }
+                      }}
                       onTimeUpdate={setCurrentTime}
                       currentTime={currentTime}
                       onPlayStateChange={setIsPlaying}

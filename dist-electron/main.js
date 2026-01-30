@@ -9,9 +9,14 @@ const VITE_DEV_SERVER_URL$1 = process.env["VITE_DEV_SERVER_URL"];
 const RENDERER_DIST$1 = path.join(APP_ROOT, "dist");
 let hudOverlayWindow = null;
 let cameraPreviewWindow = null;
+let regionSelectorWindow = null;
+let regionSelectionResolve = null;
 ipcMain.on("hud-overlay-hide", () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
     hudOverlayWindow.minimize();
+  }
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.hide();
   }
 });
 ipcMain.handle("show-camera-preview", (_, options) => {
@@ -39,9 +44,63 @@ function closeCameraPreviewWindow() {
     cameraPreviewWindow = null;
   }
 }
+function showCameraPreviewWindowIfExists() {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.show();
+  }
+}
 ipcMain.handle("update-camera-preview", (_, options) => {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
     updateCameraPreviewWindow(options);
+  }
+  return { success: true };
+});
+let originalCameraPosition = null;
+ipcMain.handle("move-camera-outside-recording", (_, recordingDisplayId) => {
+  if (!cameraPreviewWindow || cameraPreviewWindow.isDestroyed()) {
+    return { success: false, message: "No camera preview window" };
+  }
+  const displays = screen.getAllDisplays();
+  const currentBounds = cameraPreviewWindow.getBounds();
+  originalCameraPosition = { ...currentBounds };
+  const recordingDisplay = recordingDisplayId ? displays.find((d) => d.id === recordingDisplayId) : screen.getPrimaryDisplay();
+  if (!recordingDisplay) {
+    return { success: false, message: "Recording display not found" };
+  }
+  const otherDisplay = displays.find((d) => d.id !== recordingDisplay.id);
+  if (otherDisplay) {
+    const padding = 20;
+    const newX = otherDisplay.workArea.x + otherDisplay.workArea.width - currentBounds.width - padding;
+    const newY = otherDisplay.workArea.y + otherDisplay.workArea.height - currentBounds.height - padding;
+    cameraPreviewWindow.setBounds({
+      x: newX,
+      y: newY,
+      width: currentBounds.width,
+      height: currentBounds.height
+    });
+    return { success: true, movedToOtherDisplay: true };
+  } else {
+    const miniSize = 80;
+    const newX = recordingDisplay.workArea.x + recordingDisplay.workArea.width - miniSize - 10;
+    const newY = recordingDisplay.workArea.y + 10;
+    cameraPreviewWindow.setBounds({
+      x: newX,
+      y: newY,
+      width: miniSize + SHADOW_PADDING * 2,
+      height: miniSize + SHADOW_PADDING * 2
+    });
+    cameraPreviewWindow.webContents.send("camera-preview-update", { miniMode: true });
+    return { success: true, movedToOtherDisplay: false, shrunk: true };
+  }
+});
+ipcMain.handle("restore-camera-position", () => {
+  if (!cameraPreviewWindow || cameraPreviewWindow.isDestroyed()) {
+    return { success: false, message: "No camera preview window" };
+  }
+  if (originalCameraPosition) {
+    cameraPreviewWindow.setBounds(originalCameraPosition);
+    cameraPreviewWindow.webContents.send("camera-preview-update", { miniMode: false });
+    originalCameraPosition = null;
   }
   return { success: true };
 });
@@ -304,6 +363,89 @@ function createEditorWindow() {
   }
   return win;
 }
+ipcMain.handle("open-region-selector", async () => {
+  return new Promise((resolve) => {
+    regionSelectionResolve = resolve;
+    if (regionSelectorWindow && !regionSelectorWindow.isDestroyed()) {
+      regionSelectorWindow.focus();
+      return;
+    }
+    createRegionSelectorWindow();
+  });
+});
+ipcMain.handle("confirm-region-selection", (_, region) => {
+  if (regionSelectionResolve) {
+    regionSelectionResolve(region);
+    regionSelectionResolve = null;
+  }
+  if (regionSelectorWindow && !regionSelectorWindow.isDestroyed()) {
+    regionSelectorWindow.close();
+    regionSelectorWindow = null;
+  }
+  return { success: true };
+});
+ipcMain.handle("cancel-region-selection", () => {
+  if (regionSelectionResolve) {
+    regionSelectionResolve(null);
+    regionSelectionResolve = null;
+  }
+  if (regionSelectorWindow && !regionSelectorWindow.isDestroyed()) {
+    regionSelectorWindow.close();
+    regionSelectorWindow = null;
+  }
+  return { success: true };
+});
+function createRegionSelectorWindow() {
+  const displays = screen.getAllDisplays();
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const display of displays) {
+    minX = Math.min(minX, display.bounds.x);
+    minY = Math.min(minY, display.bounds.y);
+    maxX = Math.max(maxX, display.bounds.x + display.bounds.width);
+    maxY = Math.max(maxY, display.bounds.y + display.bounds.height);
+  }
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const win = new BrowserWindow({
+    x: minX,
+    y: minY,
+    width,
+    height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    fullscreen: false,
+    hasShadow: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname$1, "preload.mjs"),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setContentProtection(true);
+  if (VITE_DEV_SERVER_URL$1) {
+    win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=region-selector");
+  } else {
+    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), {
+      query: { windowType: "region-selector" }
+    });
+  }
+  regionSelectorWindow = win;
+  win.on("closed", () => {
+    if (regionSelectorWindow === win) {
+      regionSelectorWindow = null;
+    }
+    if (regionSelectionResolve) {
+      regionSelectionResolve(null);
+      regionSelectionResolve = null;
+    }
+  });
+  return win;
+}
 function createSourceSelectorWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
@@ -385,6 +527,7 @@ function createCameraPreviewWindow(options) {
   });
   const isMac = process.platform === "darwin";
   win.setAlwaysOnTop(true, isMac ? "floating" : "screen-saver");
+  win.setContentProtection(true);
   win.setIgnoreMouseEvents(false);
   win.webContents.on("did-finish-load", () => {
     win.webContents.send("camera-preview-init", options);
@@ -808,6 +951,69 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
       return { success: false, error: "No mouse events file found" };
     }
   });
+  ipcMain.handle("check-file-exists", async (_, filePath) => {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  ipcMain.handle("save-region-info", async (_, regionInfo, fileName) => {
+    try {
+      const filePath = path.join(RECORDINGS_DIR, fileName);
+      await fs.writeFile(filePath, JSON.stringify(regionInfo, null, 2));
+      return { success: true, path: filePath };
+    } catch (error) {
+      console.error("Failed to save region info:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+  ipcMain.handle("load-region-info", async (_, videoPath) => {
+    try {
+      const regionFilePath = videoPath.replace(/\.[^.]+$/, ".region.json");
+      const data = await fs.readFile(regionFilePath, "utf-8");
+      const regionInfo = JSON.parse(data);
+      return { success: true, data: regionInfo };
+    } catch {
+      return { success: false, error: "No region info found" };
+    }
+  });
+  ipcMain.handle("get-screen-for-region", async (_, region) => {
+    try {
+      const { screen: screen2 } = await import("electron");
+      const displays = screen2.getAllDisplays();
+      const centerX = region.x + region.width / 2;
+      const centerY = region.y + region.height / 2;
+      for (const display of displays) {
+        const { x, y, width, height } = display.bounds;
+        if (centerX >= x && centerX < x + width && centerY >= y && centerY < y + height) {
+          const sources2 = await desktopCapturer.getSources({ types: ["screen"] });
+          const matchingSource = sources2.find((s) => s.display_id === String(display.id));
+          if (matchingSource) {
+            return {
+              success: true,
+              screenId: matchingSource.id,
+              displayBounds: display.bounds
+            };
+          }
+        }
+      }
+      const primaryDisplay = screen2.getPrimaryDisplay();
+      const sources = await desktopCapturer.getSources({ types: ["screen"] });
+      if (sources.length > 0) {
+        return {
+          success: true,
+          screenId: sources[0].id,
+          displayBounds: primaryDisplay.bounds
+        };
+      }
+      return { success: false, error: "No screen found for region" };
+    } catch (error) {
+      console.error("Failed to get screen for region:", error);
+      return { success: false, error: String(error) };
+    }
+  });
   ipcMain.handle("save-keyframe-image", async (_, imageData, fileName) => {
     try {
       const keyframesDir = path.join(RECORDINGS_DIR, "keyframes");
@@ -976,7 +1182,10 @@ function updateTrayMenu(recording = false) {
       label: "Open",
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.isMinimized() && mainWindow.restore();
+          if (mainWindow.isMinimized()) {
+            mainWindow.restore();
+            showCameraPreviewWindowIfExists();
+          }
         } else {
           createWindow();
         }
@@ -1038,6 +1247,7 @@ app.whenReady().then(async () => {
       updateTrayMenu(recording);
       if (!recording) {
         if (mainWindow) mainWindow.restore();
+        showCameraPreviewWindowIfExists();
       }
     }
   );

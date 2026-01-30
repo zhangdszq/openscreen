@@ -11,10 +11,16 @@ const RENDERER_DIST = path.join(APP_ROOT, 'dist')
 
 let hudOverlayWindow: BrowserWindow | null = null;
 let cameraPreviewWindow: BrowserWindow | null = null;
+let regionSelectorWindow: BrowserWindow | null = null;
+let regionSelectionResolve: ((region: { x: number; y: number; width: number; height: number } | null) => void) | null = null;
 
 ipcMain.on('hud-overlay-hide', () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
     hudOverlayWindow.minimize();
+  }
+  // Also hide camera preview when HUD is hidden
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.hide();
   }
 });
 
@@ -55,6 +61,20 @@ export function closeCameraPreviewWindow() {
   }
 }
 
+// Export function to show camera preview window (used when HUD is restored)
+export function showCameraPreviewWindowIfExists() {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.show();
+  }
+}
+
+// Export function to hide camera preview window
+export function hideCameraPreviewWindow() {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.hide();
+  }
+}
+
 ipcMain.handle('update-camera-preview', (_, options: { 
   size?: number; 
   shape?: 'circle' | 'rectangle';
@@ -66,6 +86,84 @@ ipcMain.handle('update-camera-preview', (_, options: {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
     updateCameraPreviewWindow(options);
   }
+  return { success: true };
+});
+
+// Store original camera position before recording
+let originalCameraPosition: { x: number; y: number; width: number; height: number } | null = null;
+
+// Move camera preview outside recording area when recording starts
+ipcMain.handle('move-camera-outside-recording', (_, recordingDisplayId?: number) => {
+  if (!cameraPreviewWindow || cameraPreviewWindow.isDestroyed()) {
+    return { success: false, message: 'No camera preview window' };
+  }
+  
+  const displays = screen.getAllDisplays();
+  const currentBounds = cameraPreviewWindow.getBounds();
+  
+  // Save original position
+  originalCameraPosition = { ...currentBounds };
+  
+  // Find the display being recorded
+  const recordingDisplay = recordingDisplayId 
+    ? displays.find(d => d.id === recordingDisplayId)
+    : screen.getPrimaryDisplay();
+  
+  if (!recordingDisplay) {
+    return { success: false, message: 'Recording display not found' };
+  }
+  
+  // Try to find another display to move the camera to
+  const otherDisplay = displays.find(d => d.id !== recordingDisplay.id);
+  
+  if (otherDisplay) {
+    // Move to another display (bottom-right corner)
+    const padding = 20;
+    const newX = otherDisplay.workArea.x + otherDisplay.workArea.width - currentBounds.width - padding;
+    const newY = otherDisplay.workArea.y + otherDisplay.workArea.height - currentBounds.height - padding;
+    
+    cameraPreviewWindow.setBounds({
+      x: newX,
+      y: newY,
+      width: currentBounds.width,
+      height: currentBounds.height,
+    });
+    
+    return { success: true, movedToOtherDisplay: true };
+  } else {
+    // Single display - shrink and move to corner outside recording area
+    // Move to the very edge of the screen where it won't be captured
+    // (camera is recorded separately, so it just needs to stay visible to user)
+    const miniSize = 80;
+    const newX = recordingDisplay.workArea.x + recordingDisplay.workArea.width - miniSize - 10;
+    const newY = recordingDisplay.workArea.y + 10;
+    
+    cameraPreviewWindow.setBounds({
+      x: newX,
+      y: newY,
+      width: miniSize + SHADOW_PADDING * 2,
+      height: miniSize + SHADOW_PADDING * 2,
+    });
+    
+    // Send notification to renderer to show mini mode
+    cameraPreviewWindow.webContents.send('camera-preview-update', { miniMode: true });
+    
+    return { success: true, movedToOtherDisplay: false, shrunk: true };
+  }
+});
+
+// Restore camera preview to original position after recording
+ipcMain.handle('restore-camera-position', () => {
+  if (!cameraPreviewWindow || cameraPreviewWindow.isDestroyed()) {
+    return { success: false, message: 'No camera preview window' };
+  }
+  
+  if (originalCameraPosition) {
+    cameraPreviewWindow.setBounds(originalCameraPosition);
+    cameraPreviewWindow.webContents.send('camera-preview-update', { miniMode: false });
+    originalCameraPosition = null;
+  }
+  
   return { success: true };
 });
 
@@ -429,6 +527,120 @@ export function createEditorWindow(): BrowserWindow {
   return win
 }
 
+// ============================================================================
+// Region Selector Window
+// ============================================================================
+
+// IPC handler to open region selector
+ipcMain.handle('open-region-selector', async () => {
+  return new Promise((resolve) => {
+    regionSelectionResolve = resolve;
+    
+    if (regionSelectorWindow && !regionSelectorWindow.isDestroyed()) {
+      regionSelectorWindow.focus();
+      return;
+    }
+    
+    createRegionSelectorWindow();
+  });
+});
+
+// IPC handler for confirming region selection
+ipcMain.handle('confirm-region-selection', (_, region: { x: number; y: number; width: number; height: number }) => {
+  if (regionSelectionResolve) {
+    regionSelectionResolve(region);
+    regionSelectionResolve = null;
+  }
+  
+  if (regionSelectorWindow && !regionSelectorWindow.isDestroyed()) {
+    regionSelectorWindow.close();
+    regionSelectorWindow = null;
+  }
+  
+  return { success: true };
+});
+
+// IPC handler for canceling region selection
+ipcMain.handle('cancel-region-selection', () => {
+  if (regionSelectionResolve) {
+    regionSelectionResolve(null);
+    regionSelectionResolve = null;
+  }
+  
+  if (regionSelectorWindow && !regionSelectorWindow.isDestroyed()) {
+    regionSelectorWindow.close();
+    regionSelectorWindow = null;
+  }
+  
+  return { success: true };
+});
+
+export function createRegionSelectorWindow(): BrowserWindow {
+  // Get all displays and create a window that covers all of them
+  const displays = screen.getAllDisplays();
+  
+  // Calculate bounds that cover all displays
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const display of displays) {
+    minX = Math.min(minX, display.bounds.x);
+    minY = Math.min(minY, display.bounds.y);
+    maxX = Math.max(maxX, display.bounds.x + display.bounds.width);
+    maxY = Math.max(maxY, display.bounds.y + display.bounds.height);
+  }
+  
+  const width = maxX - minX;
+  const height = maxY - minY;
+  
+  const win = new BrowserWindow({
+    x: minX,
+    y: minY,
+    width,
+    height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    fullscreen: false,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  
+  // Make sure it's on top
+  win.setAlwaysOnTop(true, 'screen-saver');
+  
+  // Don't let it be captured
+  win.setContentProtection(true);
+  
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=region-selector');
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), {
+      query: { windowType: 'region-selector' }
+    });
+  }
+  
+  regionSelectorWindow = win;
+  
+  win.on('closed', () => {
+    if (regionSelectorWindow === win) {
+      regionSelectorWindow = null;
+    }
+    // If window was closed without confirming, resolve with null
+    if (regionSelectionResolve) {
+      regionSelectionResolve(null);
+      regionSelectionResolve = null;
+    }
+  });
+  
+  return win;
+}
+
 export function createSourceSelectorWindow(): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   
@@ -533,6 +745,10 @@ export function createCameraPreviewWindow(options: {
   // Use 'floating' on macOS (more compatible) and 'screen-saver' on Windows
   const isMac = process.platform === 'darwin';
   win.setAlwaysOnTop(true, isMac ? 'floating' : 'screen-saver');
+
+  // Prevent window from being captured during screen recording
+  // This works on Windows 10 2004+ and macOS
+  win.setContentProtection(true);
 
   // Make window click-through except for the video area
   win.setIgnoreMouseEvents(false);

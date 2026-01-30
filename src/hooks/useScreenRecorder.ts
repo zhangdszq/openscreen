@@ -74,6 +74,11 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
   const startTime = useRef<number>(0);
   const recordingTimestamp = useRef<number>(0);
   const recordingBounds = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  
+  // Camera separate recording
+  const cameraRecorder = useRef<MediaRecorder | null>(null);
+  const cameraStream = useRef<MediaStream | null>(null);
+  const cameraChunks = useRef<Blob[]>([]);
 
   // Target visually lossless 4K @ 60fps; fall back gracefully when hardware cannot keep up
   const TARGET_FRAME_RATE = 60;
@@ -228,6 +233,15 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         audioStream.current = null;
       }
       
+      // Stop camera recording
+      if (cameraRecorder.current?.state === "recording") {
+        cameraRecorder.current.stop();
+      }
+      if (cameraStream.current) {
+        cameraStream.current.getTracks().forEach(track => track.stop());
+        cameraStream.current = null;
+      }
+      
       // Note: Mouse tracking is stopped in recorder.onstop to ensure
       // it captures all events until the very end
       
@@ -236,7 +250,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 
       window.electronAPI?.setRecordingState(false);
       
-      // Update camera preview to hide recording indicator
+      // Update camera preview to unlock position/size
       window.electronAPI?.updateCameraPreview?.({ recording: false });
     }
   });
@@ -256,6 +270,9 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       if (mediaRecorder.current?.state === "recording") {
         mediaRecorder.current.stop();
       }
+      if (cameraRecorder.current?.state === "recording") {
+        cameraRecorder.current.stop();
+      }
       if (stream.current) {
         stream.current.getTracks().forEach(track => track.stop());
         stream.current = null;
@@ -263,6 +280,10 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       if (audioStream.current) {
         audioStream.current.getTracks().forEach(track => track.stop());
         audioStream.current = null;
+      }
+      if (cameraStream.current) {
+        cameraStream.current.getTracks().forEach(track => track.stop());
+        cameraStream.current = null;
       }
     };
   }, []);
@@ -276,24 +297,50 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         return;
       }
 
-      // Determine the actual source to record
-      // If camera is enabled and source is a window, record the screen instead
-      // so the camera preview window will be included in the recording
-      let actualSourceId = selectedSource.id;
+      // Check if this is a region selection
+      const isRegionSource = selectedSource.id.startsWith('region:');
       const isWindowSource = selectedSource.id.startsWith('window:');
-      console.log('Is window source:', isWindowSource, 'Camera enabled:', cameraSettings.enabled);
       
-      if (isWindowSource && cameraSettings.enabled) {
-        // Get the screen that contains this window
-        const screenSourceResult = await window.electronAPI?.getScreenForWindow?.(selectedSource.name);
-        console.log('Screen for window result:', screenSourceResult);
-        if (screenSourceResult?.success && screenSourceResult.screenId) {
-          actualSourceId = screenSourceResult.screenId;
-          console.log('Camera enabled with window source, switching to screen recording:', actualSourceId);
+      let actualSourceId = selectedSource.id;
+      let regionCrop: { x: number; y: number; width: number; height: number } | null = null;
+      
+      if (isRegionSource) {
+        // Parse region coordinates from ID: region:x,y,width,height
+        const coords = selectedSource.id.replace('region:', '').split(',').map(Number);
+        if (coords.length === 4) {
+          const absoluteRegion = { x: coords[0], y: coords[1], width: coords[2], height: coords[3] };
+          console.log('Region recording (absolute):', absoluteRegion);
+          
+          // Get the screen that contains this region
+          const screenResult = await window.electronAPI?.getScreenForRegion?.(absoluteRegion);
+          if (screenResult?.success && screenResult.screenId) {
+            actualSourceId = screenResult.screenId;
+            console.log('Recording screen for region:', actualSourceId);
+            
+            // Convert absolute coordinates to relative to the display
+            if (screenResult.displayBounds) {
+              regionCrop = {
+                x: absoluteRegion.x - screenResult.displayBounds.x,
+                y: absoluteRegion.y - screenResult.displayBounds.y,
+                width: absoluteRegion.width,
+                height: absoluteRegion.height
+              };
+              console.log('Region relative to display:', regionCrop);
+            } else {
+              regionCrop = absoluteRegion;
+            }
+          } else {
+            // Fallback to primary screen
+            regionCrop = absoluteRegion;
+            const sources = await window.electronAPI.getSources({ types: ['screen'] });
+            if (sources.length > 0) {
+              actualSourceId = sources[0].id;
+            }
+          }
         }
       }
       
-      console.log('Actual source ID to record:', actualSourceId);
+      console.log('Recording source ID:', actualSourceId, 'isWindow:', isWindowSource, 'isRegion:', isRegionSource);
 
       const mediaStream = await (navigator.mediaDevices as any).getUserMedia({
         audio: false,
@@ -449,6 +496,17 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
               console.warn('Failed to save mouse events:', error);
             }
           }
+          
+          // Save region crop info if this was a region recording
+          if (regionCrop && window.electronAPI?.saveRegionInfo) {
+            const regionFileName = `recording-${timestamp}.region.json`;
+            try {
+              await window.electronAPI.saveRegionInfo(regionCrop, regionFileName);
+              console.log('Region info saved:', regionFileName);
+            } catch (error) {
+              console.warn('Failed to save region info:', error);
+            }
+          }
 
           if (videoResult.path) {
             await window.electronAPI.setCurrentVideoPath(videoResult.path);
@@ -460,15 +518,74 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         }
       };
       recorder.onerror = () => setRecording(false);
+      
+      // Start camera recording separately if camera is enabled
+      if (cameraSettings.enabled && cameraSettings.deviceId) {
+        try {
+          const camStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: cameraSettings.deviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 },
+            },
+            audio: false,
+          });
+          cameraStream.current = camStream;
+          
+          cameraChunks.current = [];
+          const camRecorder = new MediaRecorder(camStream, {
+            mimeType,
+            videoBitsPerSecond: 5_000_000, // 5 Mbps for camera
+          });
+          cameraRecorder.current = camRecorder;
+          
+          camRecorder.ondataavailable = e => {
+            if (e.data && e.data.size > 0) cameraChunks.current.push(e.data);
+          };
+          
+          camRecorder.onstop = async () => {
+            if (cameraChunks.current.length === 0) return;
+            const duration = Date.now() - startTime.current;
+            const recordedChunks = cameraChunks.current;
+            const buggyBlob = new Blob(recordedChunks, { type: mimeType });
+            cameraChunks.current = [];
+            const timestamp = recordingTimestamp.current || Date.now();
+            const cameraFileName = `recording-${timestamp}.camera.webm`;
+            
+            try {
+              const cameraBlob = await fixWebmDuration(buggyBlob, duration);
+              const arrayBuffer = await cameraBlob.arrayBuffer();
+              const result = await window.electronAPI.storeRecordedVideo(arrayBuffer, cameraFileName);
+              if (result.success) {
+                console.log('Camera video saved:', cameraFileName);
+              } else {
+                console.error('Failed to store camera video:', result.message);
+              }
+            } catch (error) {
+              console.error('Error saving camera recording:', error);
+            }
+          };
+          
+          camRecorder.start(1000);
+          console.log('Camera recording started separately');
+        } catch (error) {
+          console.warn('Failed to start camera recording:', error);
+        }
+      }
+      
       recorder.start(1000);
       startTime.current = Date.now();
       recordingTimestamp.current = Date.now();
       setRecording(true);
       window.electronAPI?.setRecordingState(true);
       
-      // Notify camera preview of recording state (for locking position/size)
+      // Notify camera preview of recording state
+      // Camera window uses setContentProtection(true) so it won't be captured
+      // even during full screen recording (Windows 10 2004+ and macOS)
       if (cameraSettings.enabled) {
         window.electronAPI?.updateCameraPreview?.({ recording: true });
+        console.log('Camera preview will not be captured (content protection enabled)');
       }
     } catch (error) {
       console.error('Failed to start recording:', error);
