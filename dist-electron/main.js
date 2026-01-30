@@ -47,35 +47,38 @@ ipcMain.handle("update-camera-preview", (_, options) => {
 });
 ipcMain.handle("resize-camera-preview", (_, newSize) => {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
-    const pixelSize = Math.round(newSize);
+    const contentSize = Math.round(newSize);
+    const windowSize = contentSize + SHADOW_PADDING * 2;
     const bounds = cameraPreviewWindow.getBounds();
     const centerX = bounds.x + bounds.width / 2;
     const centerY = bounds.y + bounds.height / 2;
-    const newX = Math.round(centerX - pixelSize / 2);
-    const newY = Math.round(centerY - pixelSize / 2);
+    const newX = Math.round(centerX - windowSize / 2);
+    const newY = Math.round(centerY - windowSize / 2);
     cameraPreviewWindow.setBounds({
       x: newX,
       y: newY,
-      width: pixelSize,
-      height: pixelSize
+      width: windowSize,
+      height: windowSize
     });
   }
   return { success: true };
 });
 ipcMain.handle("resize-camera-preview-rect", (_, newWidth, newHeight) => {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
-    const width = Math.round(newWidth);
-    const height = Math.round(newHeight);
+    const contentWidth = Math.round(newWidth);
+    const contentHeight = Math.round(newHeight);
+    const windowWidth = contentWidth + SHADOW_PADDING * 2;
+    const windowHeight = contentHeight + SHADOW_PADDING * 2;
     const bounds = cameraPreviewWindow.getBounds();
     const centerX = bounds.x + bounds.width / 2;
     const centerY = bounds.y + bounds.height / 2;
-    const newX = Math.round(centerX - width / 2);
-    const newY = Math.round(centerY - height / 2);
+    const newX = Math.round(centerX - windowWidth / 2);
+    const newY = Math.round(centerY - windowHeight / 2);
     cameraPreviewWindow.setBounds({
       x: newX,
       y: newY,
-      width,
-      height
+      width: windowWidth,
+      height: windowHeight
     });
   }
   return { success: true };
@@ -136,64 +139,82 @@ ipcMain.handle("get-screen-for-window", async (_) => {
 });
 function updateCameraPreviewWindow(options) {
   if (!cameraPreviewWindow || cameraPreviewWindow.isDestroyed()) return;
-  if (options.size !== void 0 || options.shape !== void 0 || options.position !== void 0) {
+  const shouldReposition = options.position !== void 0;
+  const shouldResize = options.size !== void 0 || options.shape !== void 0;
+  if (shouldReposition) {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { workArea } = primaryDisplay;
-    const pixelSize = options.size ? Math.max(80, Math.min(200, Math.round(options.size / 100 * workArea.width))) : 150;
-    const height = options.shape === "rectangle" ? Math.round(pixelSize * 0.75) : pixelSize;
+    const bounds = cameraPreviewWindow.getBounds();
+    const contentSize = bounds.width - SHADOW_PADDING * 2;
+    const contentHeight = bounds.height - SHADOW_PADDING * 2;
     const padding = 20;
     let x, y;
     switch (options.position) {
       case "top-left":
-        x = workArea.x + padding;
-        y = workArea.y + padding;
+        x = workArea.x + padding - SHADOW_PADDING;
+        y = workArea.y + padding - SHADOW_PADDING;
         break;
       case "top-right":
-        x = workArea.x + workArea.width - pixelSize - padding;
-        y = workArea.y + padding;
+        x = workArea.x + workArea.width - contentSize - padding - SHADOW_PADDING;
+        y = workArea.y + padding - SHADOW_PADDING;
         break;
       case "bottom-left":
-        x = workArea.x + padding;
-        y = workArea.y + workArea.height - height - padding - 60;
+        x = workArea.x + padding - SHADOW_PADDING;
+        y = workArea.y + workArea.height - contentHeight - padding - 60 - SHADOW_PADDING;
         break;
       case "bottom-right":
       default:
-        x = workArea.x + workArea.width - pixelSize - padding;
-        y = workArea.y + workArea.height - height - padding - 60;
+        x = workArea.x + workArea.width - contentSize - padding - SHADOW_PADDING;
+        y = workArea.y + workArea.height - contentHeight - padding - 60 - SHADOW_PADDING;
         break;
     }
-    cameraPreviewWindow.setBounds({ x, y, width: pixelSize, height });
+    cameraPreviewWindow.setBounds({ x, y, width: bounds.width, height: bounds.height });
+  } else if (shouldResize) {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { workArea } = primaryDisplay;
+    const bounds = cameraPreviewWindow.getBounds();
+    const contentSize = options.size ? Math.max(80, Math.min(200, Math.round(options.size / 100 * workArea.width))) : bounds.width - SHADOW_PADDING * 2;
+    const contentHeight = options.shape === "rectangle" ? Math.round(contentSize * 0.75) : contentSize;
+    const windowWidth = contentSize + SHADOW_PADDING * 2;
+    const windowHeight = contentHeight + SHADOW_PADDING * 2;
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    const newX = Math.round(centerX - windowWidth / 2);
+    const newY = Math.round(centerY - windowHeight / 2);
+    cameraPreviewWindow.setBounds({ x: newX, y: newY, width: windowWidth, height: windowHeight });
   }
   cameraPreviewWindow.webContents.send("camera-preview-update", options);
 }
 function positionCameraInArea(options) {
   if (!cameraPreviewWindow || cameraPreviewWindow.isDestroyed()) return;
   const { area, size, shape, position } = options;
-  const pixelSize = Math.max(80, Math.min(200, Math.round(size / 100 * area.width)));
-  const height = shape === "rectangle" ? Math.round(pixelSize * 0.75) : pixelSize;
+  const contentSize = Math.max(80, Math.min(200, Math.round(size / 100 * area.width)));
+  const contentHeight = shape === "rectangle" ? Math.round(contentSize * 0.75) : contentSize;
+  const windowWidth = contentSize + SHADOW_PADDING * 2;
+  const windowHeight = contentHeight + SHADOW_PADDING * 2;
   const padding = 20;
   let x, y;
   switch (position) {
     case "top-left":
-      x = area.x + padding;
-      y = area.y + padding;
+      x = area.x + padding - SHADOW_PADDING;
+      y = area.y + padding - SHADOW_PADDING;
       break;
     case "top-right":
-      x = area.x + area.width - pixelSize - padding;
-      y = area.y + padding;
+      x = area.x + area.width - contentSize - padding - SHADOW_PADDING;
+      y = area.y + padding - SHADOW_PADDING;
       break;
     case "bottom-left":
-      x = area.x + padding;
-      y = area.y + area.height - height - padding - 60;
+      x = area.x + padding - SHADOW_PADDING;
+      y = area.y + area.height - contentHeight - padding - 60 - SHADOW_PADDING;
       break;
     case "bottom-right":
     default:
-      x = area.x + area.width - pixelSize - padding;
-      y = area.y + area.height - height - padding - 60;
+      x = area.x + area.width - contentSize - padding - SHADOW_PADDING;
+      y = area.y + area.height - contentHeight - padding - 60 - SHADOW_PADDING;
       break;
   }
-  console.log("Setting camera preview bounds:", { x, y, width: pixelSize, height, shape });
-  cameraPreviewWindow.setBounds({ x, y, width: pixelSize, height });
+  console.log("Setting camera preview bounds:", { x, y, width: windowWidth, height: windowHeight, shape });
+  cameraPreviewWindow.setBounds({ x, y, width: windowWidth, height: windowHeight });
   cameraPreviewWindow.webContents.send("camera-preview-update", { size, shape, position });
 }
 function createHudOverlayWindow() {
@@ -203,6 +224,7 @@ function createHudOverlayWindow() {
   const windowHeight = 400;
   const x = Math.floor(workArea.x + (workArea.width - windowWidth) / 2);
   const y = Math.floor(workArea.y + workArea.height - windowHeight - 5);
+  const isMac = process.platform === "darwin";
   const win = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -225,6 +247,7 @@ function createHudOverlayWindow() {
       backgroundThrottling: false
     }
   });
+  win.setAlwaysOnTop(true, isMac ? "pop-up-menu" : "screen-saver");
   win.webContents.on("did-finish-load", () => {
     win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
   });
@@ -310,35 +333,38 @@ function createSourceSelectorWindow() {
   }
   return win;
 }
+const SHADOW_PADDING = 5;
 function createCameraPreviewWindow(options) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { workArea } = primaryDisplay;
-  const pixelSize = Math.max(80, Math.min(200, Math.round(options.size / 100 * workArea.width)));
-  const height = options.shape === "rectangle" ? Math.round(pixelSize * 0.75) : pixelSize;
+  const contentSize = Math.max(80, Math.min(200, Math.round(options.size / 100 * workArea.width)));
+  const contentHeight = options.shape === "rectangle" ? Math.round(contentSize * 0.75) : contentSize;
+  const windowWidth = contentSize + SHADOW_PADDING * 2;
+  const windowHeight = contentHeight + SHADOW_PADDING * 2;
   const padding = 20;
   let x, y;
   switch (options.position) {
     case "top-left":
-      x = workArea.x + padding;
-      y = workArea.y + padding;
+      x = workArea.x + padding - SHADOW_PADDING;
+      y = workArea.y + padding - SHADOW_PADDING;
       break;
     case "top-right":
-      x = workArea.x + workArea.width - pixelSize - padding;
-      y = workArea.y + padding;
+      x = workArea.x + workArea.width - contentSize - padding - SHADOW_PADDING;
+      y = workArea.y + padding - SHADOW_PADDING;
       break;
     case "bottom-left":
-      x = workArea.x + padding;
-      y = workArea.y + workArea.height - height - padding - 60;
+      x = workArea.x + padding - SHADOW_PADDING;
+      y = workArea.y + workArea.height - contentHeight - padding - 60 - SHADOW_PADDING;
       break;
     case "bottom-right":
     default:
-      x = workArea.x + workArea.width - pixelSize - padding;
-      y = workArea.y + workArea.height - height - padding - 60;
+      x = workArea.x + workArea.width - contentSize - padding - SHADOW_PADDING;
+      y = workArea.y + workArea.height - contentHeight - padding - 60 - SHADOW_PADDING;
       break;
   }
   const win = new BrowserWindow({
-    width: pixelSize,
-    height,
+    width: windowWidth,
+    height: windowHeight,
     x,
     y,
     frame: false,
@@ -348,6 +374,8 @@ function createCameraPreviewWindow(options) {
     skipTaskbar: true,
     hasShadow: false,
     focusable: false,
+    backgroundColor: "#00000000",
+    // Fully transparent background
     webPreferences: {
       preload: path.join(__dirname$1, "preload.mjs"),
       nodeIntegration: false,
@@ -355,20 +383,25 @@ function createCameraPreviewWindow(options) {
       backgroundThrottling: false
     }
   });
-  win.setAlwaysOnTop(true, "screen-saver");
+  const isMac = process.platform === "darwin";
+  win.setAlwaysOnTop(true, isMac ? "floating" : "screen-saver");
   win.setIgnoreMouseEvents(false);
   win.webContents.on("did-finish-load", () => {
     win.webContents.send("camera-preview-init", options);
   });
+  const borderStyle = options.borderStyle || "shadow";
+  const shadowIntensity = options.shadowIntensity ?? 60;
   if (VITE_DEV_SERVER_URL$1) {
-    win.loadURL(VITE_DEV_SERVER_URL$1 + `?windowType=camera-preview&shape=${options.shape}&size=${options.size}&position=${options.position}`);
+    win.loadURL(VITE_DEV_SERVER_URL$1 + `?windowType=camera-preview&shape=${options.shape}&size=${options.size}&position=${options.position}&borderStyle=${borderStyle}&shadowIntensity=${shadowIntensity}`);
   } else {
     win.loadFile(path.join(RENDERER_DIST$1, "index.html"), {
       query: {
         windowType: "camera-preview",
         shape: options.shape,
         size: String(options.size),
-        position: options.position
+        position: options.position,
+        borderStyle,
+        shadowIntensity: String(shadowIntensity)
       }
     });
   }

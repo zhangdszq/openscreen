@@ -230,6 +230,22 @@ export interface FlowRegion {
 export type FlowEndpointType = 'keyframe' | 'region';
 
 /**
+ * A group of items in the flow graph that can be moved together
+ */
+export interface FlowGroup {
+  /** Unique identifier */
+  id: string;
+  /** Group name/label */
+  label?: string;
+  /** IDs of keyframes in this group */
+  keyframeIds: string[];
+  /** IDs of regions in this group */
+  regionIds: string[];
+  /** Creation timestamp */
+  createdAt: number;
+}
+
+/**
  * Connection between nodes (keyframes or regions) in a flow graph
  */
 export interface FlowConnection {
@@ -265,6 +281,8 @@ export interface FlowGraph {
   keyframes: KeyframeCapture[];
   /** All regions in the graph */
   regions?: FlowRegion[];
+  /** Groups of items */
+  groups?: FlowGroup[];
   /** Connections between keyframes/regions */
   connections: FlowConnection[];
   /** Graph metadata */

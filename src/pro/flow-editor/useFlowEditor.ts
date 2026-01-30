@@ -7,7 +7,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type { KeyframeCapture } from '@/components/video-editor/types';
 
-export type DrawMode = 'select' | 'region';
+export type DrawMode = 'select' | 'region' | 'hand';
 
 export interface ViewportState {
   x: number;
@@ -17,7 +17,7 @@ export interface ViewportState {
 
 export interface DragState {
   isDragging: boolean;
-  dragType: 'node' | 'canvas' | 'connection' | 'draw-region' | null;
+  dragType: 'node' | 'canvas' | 'connection' | 'draw-region' | 'draw-selection' | null;
   startX: number;
   startY: number;
   nodeId?: string;
@@ -31,6 +31,13 @@ export interface DrawingRegion {
   endY: number;
 }
 
+export interface SelectionRect {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+}
+
 export interface FlowEditorState {
   viewport: ViewportState;
   drag: DragState;
@@ -38,6 +45,7 @@ export interface FlowEditorState {
   connectionPreview: { startId: string; endX: number; endY: number } | null;
   drawMode: DrawMode;
   drawingRegion: DrawingRegion | null;
+  selectionRect: SelectionRect | null;
 }
 
 const MIN_ZOOM = 0.1;
@@ -60,6 +68,9 @@ export function useFlowEditor() {
   } | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>('select');
   const [drawingRegion, setDrawingRegion] = useState<DrawingRegion | null>(null);
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isAltPressed, setIsAltPressed] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -110,10 +121,14 @@ export function useFlowEditor() {
     }
   }, [viewport]);
 
-  // Start canvas drag or region drawing
+  // Start canvas drag, region drawing, or selection rectangle
+  // Figma-like interaction:
+  // - Region mode: draw region
+  // - Hand mode OR Space pressed OR Middle mouse button: pan canvas
+  // - Select mode (default): draw selection rectangle for marquee selection
   const startCanvasDrag = useCallback((e: React.MouseEvent) => {
+    // Region mode: draw region
     if (drawMode === 'region') {
-      // Start drawing a region
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
       setDrag({
         isDragging: true,
@@ -127,16 +142,35 @@ export function useFlowEditor() {
         endX: canvasPos.x,
         endY: canvasPos.y,
       });
-    } else {
-      // Normal canvas pan
+      return;
+    }
+
+    // Pan canvas: Hand mode, Space key, or Middle mouse button (button === 1)
+    if (drawMode === 'hand' || isSpacePressed || e.button === 1) {
       setDrag({
         isDragging: true,
         dragType: 'canvas',
         startX: e.clientX - viewport.x,
         startY: e.clientY - viewport.y,
       });
+      return;
     }
-  }, [viewport, drawMode, screenToCanvas]);
+
+    // Select mode (default): draw selection rectangle for marquee selection
+    const canvasPos = screenToCanvas(e.clientX, e.clientY);
+    setDrag({
+      isDragging: true,
+      dragType: 'draw-selection',
+      startX: e.clientX,
+      startY: e.clientY,
+    });
+    setSelectionRect({
+      startX: canvasPos.x,
+      startY: canvasPos.y,
+      endX: canvasPos.x,
+      endY: canvasPos.y,
+    });
+  }, [viewport, drawMode, screenToCanvas, isSpacePressed]);
 
   // Start node drag
   const startNodeDrag = useCallback((e: React.MouseEvent, nodeId: string) => {
@@ -205,14 +239,22 @@ export function useFlowEditor() {
         endX: canvasPos.x,
         endY: canvasPos.y,
       } : null);
+    } else if (drag.dragType === 'draw-selection' && selectionRect) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      setSelectionRect(prev => prev ? {
+        ...prev,
+        endX: canvasPos.x,
+        endY: canvasPos.y,
+      } : null);
     }
-  }, [drag, viewport.zoom, screenToCanvas, drawingRegion]);
+  }, [drag, viewport.zoom, screenToCanvas, drawingRegion, selectionRect]);
 
   // Handle mouse up
   const handleMouseUp = useCallback((
     targetNodeId?: string,
     onConnectionCreate?: (from: string, to: string) => void,
-    onRegionDrawComplete?: (x: number, y: number, width: number, height: number) => void
+    onRegionDrawComplete?: (x: number, y: number, width: number, height: number) => void,
+    onSelectionComplete?: (rect: { x: number; y: number; width: number; height: number }) => void
   ) => {
     if (drag.dragType === 'connection' && drag.connectionStart && targetNodeId) {
       if (drag.connectionStart !== targetNodeId) {
@@ -232,6 +274,17 @@ export function useFlowEditor() {
       
       // Switch back to select mode after drawing
       setDrawMode('select');
+    } else if (drag.dragType === 'draw-selection' && selectionRect && onSelectionComplete) {
+      // Calculate selection bounds (normalize to ensure positive width/height)
+      const x = Math.min(selectionRect.startX, selectionRect.endX);
+      const y = Math.min(selectionRect.startY, selectionRect.endY);
+      const width = Math.abs(selectionRect.endX - selectionRect.startX);
+      const height = Math.abs(selectionRect.endY - selectionRect.startY);
+      
+      // Only select if rectangle is large enough (avoid accidental clicks)
+      if (width > 10 && height > 10) {
+        onSelectionComplete({ x, y, width, height });
+      }
     }
 
     setDrag({
@@ -242,7 +295,8 @@ export function useFlowEditor() {
     });
     setConnectionPreview(null);
     setDrawingRegion(null);
-  }, [drag, drawingRegion]);
+    setSelectionRect(null);
+  }, [drag, drawingRegion, selectionRect]);
 
   // Reset viewport
   const resetViewport = useCallback(() => {
@@ -295,8 +349,13 @@ export function useFlowEditor() {
     connectionPreview,
     drawMode,
     drawingRegion,
+    selectionRect,
+    isSpacePressed,
+    isAltPressed,
     setHoveredNodeId,
     setDrawMode,
+    setIsSpacePressed,
+    setIsAltPressed,
     screenToCanvas,
     canvasToScreen,
     handleWheel,

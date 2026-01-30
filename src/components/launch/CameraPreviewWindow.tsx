@@ -4,6 +4,8 @@ interface CameraPreviewOptions {
   shape: 'circle' | 'rectangle';
   size: number;
   position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  borderStyle: 'white' | 'shadow';
+  shadowIntensity: number; // 0-100
   recording?: boolean;
 }
 
@@ -17,6 +19,8 @@ export function CameraPreviewWindow() {
       shape: (params.get('shape') as 'circle' | 'rectangle') || 'circle',
       size: parseInt(params.get('size') || '15', 10),
       position: (params.get('position') as CameraPreviewOptions['position']) || 'bottom-right',
+      borderStyle: (params.get('borderStyle') as 'white' | 'shadow') || 'shadow',
+      shadowIntensity: parseInt(params.get('shadowIntensity') || '60', 10),
       recording: false,
     };
   });
@@ -97,8 +101,11 @@ export function CameraPreviewWindow() {
     }
   }, []);
 
-  // Handle drag to change position
-  const handleMouseDown = () => {
+  // Handle drag to change position (disabled during recording)
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (options.recording) return; // Lock position during recording
+    // Only start drag if not clicking on resize handles
+    if ((e.target as HTMLElement).dataset.resize) return;
     setIsDragging(true);
   };
 
@@ -139,8 +146,9 @@ export function CameraPreviewWindow() {
     };
   }, [isDragging, options.position]);
 
-  // Handle resize from any edge
+  // Handle resize from any edge (disabled during recording)
   const handleResizeMouseDown = (direction: ResizeDirection) => (e: React.MouseEvent) => {
+    if (options.recording) return; // Lock size during recording
     e.stopPropagation();
     e.preventDefault();
     setResizeDirection(direction);
@@ -228,197 +236,268 @@ export function CameraPreviewWindow() {
 
   const isResizing = resizeDirection !== null;
 
+  // For circle shape, use clip-path to ensure everything outside is clipped
+  const isCircle = options.shape === 'circle';
+  
+  // Show resize handles when not recording
+  const showResizeHandles = !options.recording;
+  
+  // Calculate drop-shadow filter for shadow border style
+  // Apply to outer container so it's not clipped
+  const getShadowFilter = () => {
+    if (options.borderStyle !== 'shadow') return 'none';
+    const intensity = options.shadowIntensity / 100;
+    // Tight shadow effect (fits within 5px padding)
+    return `
+      drop-shadow(0 1px 1px rgba(0, 0, 0, ${0.5 * intensity}))
+      drop-shadow(0 2px 3px rgba(0, 0, 0, ${0.4 * intensity}))
+      drop-shadow(0 3px 5px rgba(0, 0, 0, ${0.3 * intensity}))
+    `;
+  };
+
+  // Padding to accommodate shadow (shadow renders outside element bounds)
+  // Minimal padding - matches SHADOW_PADDING in electron/windows.ts
+  const shadowPadding = options.borderStyle === 'shadow' ? 5 : 0;
+
   return (
     <div 
-      className="cursor-move"
-      onMouseDown={handleMouseDown}
       style={{
         position: 'absolute',
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        WebkitAppRegion: 'drag',
         background: 'transparent',
-      } as React.CSSProperties}
+        overflow: 'visible',
+      }}
     >
+      {/* Shadow wrapper - NOT clipped, contains the shadow filter */}
       <div
         style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          borderRadius: options.shape === 'circle' ? '50%' : '12px',
-          border: options.recording ? '3px solid rgba(239, 68, 68, 0.9)' : '3px solid rgba(255, 255, 255, 0.8)',
-          overflow: 'hidden',
-        }}
+          top: shadowPadding,
+          left: shadowPadding,
+          right: shadowPadding,
+          bottom: shadowPadding,
+          filter: getShadowFilter(),
+          WebkitFilter: getShadowFilter(),
+        } as React.CSSProperties}
       >
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          style={{ 
+        {/* Main content area with clipping */}
+        <div 
+          className="cursor-move"
+          onMouseDown={handleMouseDown}
+          style={{
             position: 'absolute',
             top: 0,
             left: 0,
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-            objectPosition: 'center center',
-            transform: 'scaleX(-1)',
-          }}
-        />
-        {/* Recording indicator overlay */}
-        {options.recording && (
-          <div className="absolute top-1 right-1 flex items-center gap-1 bg-black/50 rounded-full px-1.5 py-0.5">
-            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            <span className="text-white text-[10px] font-medium">REC</span>
+            right: 0,
+            bottom: 0,
+            WebkitAppRegion: 'drag',
+            background: 'transparent',
+            // Clip everything outside the circle/rectangle
+            WebkitClipPath: isCircle ? 'circle(50% at center)' : 'inset(0 round 12px)',
+            clipPath: isCircle ? 'circle(50% at center)' : 'inset(0 round 12px)',
+          } as React.CSSProperties}
+        >
+          {/* Video container */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              borderRadius: isCircle ? '50%' : '12px',
+              overflow: 'hidden',
+              // No background color - fully transparent until video loads
+            }}
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{ 
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                objectPosition: 'center center',
+                transform: 'scaleX(-1)',
+              }}
+            />
           </div>
-        )}
+          
+          {/* Border overlay - inside the clip area (only for white border style) */}
+          {options.borderStyle === 'white' && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                borderRadius: isCircle ? '50%' : '12px',
+                border: '3px solid rgba(255, 255, 255, 0.8)',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+          
+          {isDragging && (
+            <div 
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.4)',
+                borderRadius: isCircle ? '50%' : '12px',
+              }}
+            >
+              <span className="text-white text-xs font-medium drop-shadow-lg">拖动到角落</span>
+            </div>
+          )}
+          
+          {isResizing && (
+            <div 
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.4)',
+                borderRadius: isCircle ? '50%' : '12px',
+              }}
+            >
+              <span className="text-white text-xs font-medium drop-shadow-lg">调整大小</span>
+            </div>
+          )}
+        </div>
       </div>
-      {isDragging && (
-        <div 
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'rgba(0,0,0,0.4)',
-            borderRadius: options.shape === 'circle' ? '50%' : '12px',
-          }}
-        >
-          <span className="text-white text-xs font-medium drop-shadow-lg">拖动到角落</span>
-        </div>
-      )}
       
-      {/* Resize handles - all edges and corners */}
-      {/* Edge handles */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 32,
-          height: 8,
-          cursor: 'n-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('n')}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 32,
-          height: 8,
-          cursor: 's-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('s')}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          width: 8,
-          height: 32,
-          cursor: 'w-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('w')}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          right: 0,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          width: 8,
-          height: 32,
-          cursor: 'e-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('e')}
-      />
-      
-      {/* Corner handles */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: 16,
-          height: 16,
-          cursor: 'nw-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('nw')}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          right: 0,
-          width: 16,
-          height: 16,
-          cursor: 'ne-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('ne')}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          width: 16,
-          height: 16,
-          cursor: 'sw-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('sw')}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          right: 0,
-          width: 16,
-          height: 16,
-          cursor: 'se-resize',
-          WebkitAppRegion: 'no-drag',
-        } as React.CSSProperties}
-        onMouseDown={handleResizeMouseDown('se')}
-      />
-      
-      {isResizing && (
-        <div 
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'rgba(0,0,0,0.4)',
-            borderRadius: options.shape === 'circle' ? '50%' : '12px',
-          }}
-        >
-          <span className="text-white text-xs font-medium drop-shadow-lg">调整大小</span>
-        </div>
+      {/* Resize handles - positioned at edges of the actual content area */}
+      {showResizeHandles && (
+        <>
+          {/* Corner handles */}
+          <div
+            data-resize="nw"
+            style={{
+              position: 'absolute',
+              top: shadowPadding,
+              left: shadowPadding,
+              width: 20,
+              height: 20,
+              cursor: 'nw-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('nw')}
+          />
+          <div
+            data-resize="ne"
+            style={{
+              position: 'absolute',
+              top: shadowPadding,
+              right: shadowPadding,
+              width: 20,
+              height: 20,
+              cursor: 'ne-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('ne')}
+          />
+          <div
+            data-resize="sw"
+            style={{
+              position: 'absolute',
+              bottom: shadowPadding,
+              left: shadowPadding,
+              width: 20,
+              height: 20,
+              cursor: 'sw-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('sw')}
+          />
+          <div
+            data-resize="se"
+            style={{
+              position: 'absolute',
+              bottom: shadowPadding,
+              right: shadowPadding,
+              width: 20,
+              height: 20,
+              cursor: 'se-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('se')}
+          />
+          
+          {/* Edge handles */}
+          <div
+            data-resize="n"
+            style={{
+              position: 'absolute',
+              top: shadowPadding,
+              left: shadowPadding + 20,
+              right: shadowPadding + 20,
+              height: 10,
+              cursor: 'n-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('n')}
+          />
+          <div
+            data-resize="s"
+            style={{
+              position: 'absolute',
+              bottom: shadowPadding,
+              left: shadowPadding + 20,
+              right: shadowPadding + 20,
+              height: 10,
+              cursor: 's-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('s')}
+          />
+          <div
+            data-resize="w"
+            style={{
+              position: 'absolute',
+              left: shadowPadding,
+              top: shadowPadding + 20,
+              bottom: shadowPadding + 20,
+              width: 10,
+              cursor: 'w-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('w')}
+          />
+          <div
+            data-resize="e"
+            style={{
+              position: 'absolute',
+              right: shadowPadding,
+              top: shadowPadding + 20,
+              bottom: shadowPadding + 20,
+              width: 10,
+              cursor: 'e-resize',
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties}
+            onMouseDown={handleResizeMouseDown('e')}
+          />
+        </>
       )}
     </div>
   );

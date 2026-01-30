@@ -14,8 +14,11 @@ import {
   X,
   Square,
   MousePointer2,
+  Hand,
   Undo2,
   Redo2,
+  Group,
+  Ungroup,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DrawMode } from './useFlowEditor';
@@ -23,9 +26,12 @@ import type { DrawMode } from './useFlowEditor';
 interface FlowToolbarProps {
   zoom: number;
   hasSelection: boolean;
+  canGroup: boolean;
+  canUngroup: boolean;
   keyframeCount: number;
   connectionCount: number;
   regionCount: number;
+  groupCount: number;
   drawMode: DrawMode;
   canUndo: boolean;
   canRedo: boolean;
@@ -35,6 +41,8 @@ interface FlowToolbarProps {
   onResetView: () => void;
   onAutoLayout: () => void;
   onDeleteSelected: () => void;
+  onGroup: () => void;
+  onUngroup: () => void;
   onSetDrawMode: (mode: DrawMode) => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -45,9 +53,12 @@ interface FlowToolbarProps {
 export function FlowToolbar({
   zoom,
   hasSelection,
+  canGroup,
+  canUngroup,
   keyframeCount,
   connectionCount,
   regionCount,
+  groupCount,
   drawMode,
   canUndo,
   canRedo,
@@ -57,6 +68,8 @@ export function FlowToolbar({
   onResetView,
   onAutoLayout,
   onDeleteSelected,
+  onGroup,
+  onUngroup,
   onSetDrawMode,
   onUndo,
   onRedo,
@@ -74,13 +87,19 @@ export function FlowToolbar({
           <ToolbarButton
             icon={<MousePointer2 className="w-4 h-4" />}
             onClick={() => onSetDrawMode('select')}
-            title="选择工具"
+            title="选择工具 (V)"
             active={drawMode === 'select'}
+          />
+          <ToolbarButton
+            icon={<Hand className="w-4 h-4" />}
+            onClick={() => onSetDrawMode('hand')}
+            title="抓手工具 (H)"
+            active={drawMode === 'hand'}
           />
           <ToolbarButton
             icon={<Square className="w-4 h-4" />}
             onClick={() => onSetDrawMode('region')}
-            title="绘制区域"
+            title="绘制区域 (R)"
             active={drawMode === 'region'}
           />
         </div>
@@ -90,14 +109,30 @@ export function FlowToolbar({
           <ToolbarButton
             icon={<Undo2 className="w-4 h-4" />}
             onClick={onUndo}
-            title="撤销 (Cmd+Z)"
+            title="撤销 (⌘/Ctrl+Z)"
             disabled={!canUndo}
           />
           <ToolbarButton
             icon={<Redo2 className="w-4 h-4" />}
             onClick={onRedo}
-            title="重做 (Cmd+Shift+Z)"
+            title="重做 (⌘/Ctrl+Shift+Z)"
             disabled={!canRedo}
+          />
+        </div>
+
+        {/* Group/Ungroup */}
+        <div className="flex items-center gap-1 bg-black/40 rounded-lg p-1">
+          <ToolbarButton
+            icon={<Group className="w-4 h-4" />}
+            onClick={onGroup}
+            title="编组 (⌘/Ctrl+G)"
+            disabled={!canGroup}
+          />
+          <ToolbarButton
+            icon={<Ungroup className="w-4 h-4" />}
+            onClick={onUngroup}
+            title="取消编组 (⌘/Ctrl+Shift+G)"
+            disabled={!canUngroup}
           />
         </div>
 
@@ -105,6 +140,8 @@ export function FlowToolbar({
           <span>{keyframeCount} 关键帧</span>
           <span>•</span>
           <span>{regionCount} 区域</span>
+          <span>•</span>
+          <span>{groupCount} 组</span>
           <span>•</span>
           <span>{connectionCount} 连接</span>
         </div>

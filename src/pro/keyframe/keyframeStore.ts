@@ -11,6 +11,7 @@ import type {
   FlowGraph, 
   FlowConnection,
   FlowRegion,
+  FlowGroup,
   FlowEndpointType,
 } from '@/components/video-editor/types';
 import { createEmptyFlowGraph as createGraph } from '@/components/video-editor/types';
@@ -73,6 +74,9 @@ interface KeyframeState {
   selectKeyframe: (id: string, multi?: boolean) => void;
   selectRegion: (id: string, multi?: boolean) => void;
   selectConnection: (id: string, multi?: boolean) => void;
+  selectAllKeyframes: () => void;
+  selectAllItems: () => void;
+  selectItemsInRect: (rect: { x: number; y: number; width: number; height: number }) => void;
   clearSelection: () => void;
   
   // Extraction state
@@ -82,6 +86,12 @@ interface KeyframeState {
   // Flow position helpers
   updateKeyframePosition: (id: string, x: number, y: number) => void;
   autoLayoutKeyframes: () => void;
+  
+  // Group actions
+  createGroup: () => string | null;
+  ungroup: () => void;
+  getGroupForItem: (itemId: string, itemType: 'keyframe' | 'region') => FlowGroup | null;
+  moveGroupItems: (groupId: string, deltaX: number, deltaY: number) => void;
   
   // History actions
   undo: () => void;
@@ -333,6 +343,54 @@ export const useKeyframeStore = create<KeyframeState>((set, get) => ({
     selectedRegionIds: multi ? state.selectedRegionIds : [],
   })),
 
+  selectAllKeyframes: () => set((state) => ({
+    selectedKeyframeIds: state.flowGraph.keyframes.map(kf => kf.id),
+    selectedRegionIds: [],
+    selectedConnectionIds: [],
+  })),
+
+  selectAllItems: () => set((state) => ({
+    selectedKeyframeIds: state.flowGraph.keyframes.map(kf => kf.id),
+    selectedRegionIds: (state.flowGraph.regions || []).map(r => r.id),
+    selectedConnectionIds: [],
+  })),
+
+  selectItemsInRect: (rect) => set((state) => {
+    const nodeWidth = 180;
+    const nodeHeight = 120;
+    
+    // Select keyframes that intersect with the rectangle
+    const selectedKeyframeIds = state.flowGraph.keyframes
+      .filter(kf => {
+        const pos = kf.flowPosition || { x: 0, y: 0 };
+        return (
+          pos.x < rect.x + rect.width &&
+          pos.x + nodeWidth > rect.x &&
+          pos.y < rect.y + rect.height &&
+          pos.y + nodeHeight > rect.y
+        );
+      })
+      .map(kf => kf.id);
+    
+    // Select regions that intersect with the rectangle
+    const selectedRegionIds = (state.flowGraph.regions || [])
+      .filter(region => {
+        return (
+          region.position.x < rect.x + rect.width &&
+          region.position.x + region.size.width > rect.x &&
+          region.position.y < rect.y + rect.height &&
+          region.position.y + region.size.height > rect.y
+        );
+      })
+      .map(r => r.id);
+    
+    return {
+      selectedKeyframeIds,
+      selectedRegionIds,
+      selectedConnectionIds: [],
+    };
+  }),
+
   clearSelection: () => set({
     selectedKeyframeIds: [],
     selectedRegionIds: [],
@@ -404,6 +462,125 @@ export const useKeyframeStore = create<KeyframeState>((set, get) => ({
         ...state.flowGraph,
         keyframes: updatedKeyframes,
         connections: newConnections,
+        metadata: updateMetadata(state.flowGraph.metadata),
+      },
+    };
+  }),
+
+  // Group actions
+  createGroup: () => {
+    const state = get();
+    const { selectedKeyframeIds, selectedRegionIds } = state;
+    
+    // Need at least 2 items to create a group
+    if (selectedKeyframeIds.length + selectedRegionIds.length < 2) {
+      return null;
+    }
+    
+    // Check if any selected items are already in a group
+    const existingGroups = state.flowGraph.groups || [];
+    for (const group of existingGroups) {
+      const hasKeyframe = selectedKeyframeIds.some(id => group.keyframeIds.includes(id));
+      const hasRegion = selectedRegionIds.some(id => group.regionIds.includes(id));
+      if (hasKeyframe || hasRegion) {
+        // Already in a group, ungroup first
+        return null;
+      }
+    }
+    
+    const newGroup: FlowGroup = {
+      id: uuidv4(),
+      keyframeIds: [...selectedKeyframeIds],
+      regionIds: [...selectedRegionIds],
+      createdAt: Date.now(),
+    };
+    
+    set((state) => ({
+      flowGraph: {
+        ...state.flowGraph,
+        groups: [...(state.flowGraph.groups || []), newGroup],
+        metadata: updateMetadata(state.flowGraph.metadata),
+      },
+    }));
+    
+    return newGroup.id;
+  },
+
+  ungroup: () => set((state) => {
+    const { selectedKeyframeIds, selectedRegionIds } = state;
+    const existingGroups = state.flowGraph.groups || [];
+    
+    // Find groups that contain any of the selected items
+    const groupIdsToRemove = new Set<string>();
+    for (const group of existingGroups) {
+      const hasKeyframe = selectedKeyframeIds.some(id => group.keyframeIds.includes(id));
+      const hasRegion = selectedRegionIds.some(id => group.regionIds.includes(id));
+      if (hasKeyframe || hasRegion) {
+        groupIdsToRemove.add(group.id);
+      }
+    }
+    
+    if (groupIdsToRemove.size === 0) return state;
+    
+    return {
+      flowGraph: {
+        ...state.flowGraph,
+        groups: existingGroups.filter(g => !groupIdsToRemove.has(g.id)),
+        metadata: updateMetadata(state.flowGraph.metadata),
+      },
+    };
+  }),
+
+  getGroupForItem: (itemId, itemType) => {
+    const state = get();
+    const groups = state.flowGraph.groups || [];
+    
+    for (const group of groups) {
+      if (itemType === 'keyframe' && group.keyframeIds.includes(itemId)) {
+        return group;
+      }
+      if (itemType === 'region' && group.regionIds.includes(itemId)) {
+        return group;
+      }
+    }
+    
+    return null;
+  },
+
+  moveGroupItems: (groupId, deltaX, deltaY) => set((state) => {
+    const groups = state.flowGraph.groups || [];
+    const group = groups.find(g => g.id === groupId);
+    
+    if (!group) return state;
+    
+    // Move all keyframes in the group
+    const updatedKeyframes = state.flowGraph.keyframes.map(kf => {
+      if (group.keyframeIds.includes(kf.id)) {
+        const pos = kf.flowPosition || { x: 0, y: 0 };
+        return {
+          ...kf,
+          flowPosition: { x: pos.x + deltaX, y: pos.y + deltaY },
+        };
+      }
+      return kf;
+    });
+    
+    // Move all regions in the group
+    const updatedRegions = (state.flowGraph.regions || []).map(r => {
+      if (group.regionIds.includes(r.id)) {
+        return {
+          ...r,
+          position: { x: r.position.x + deltaX, y: r.position.y + deltaY },
+        };
+      }
+      return r;
+    });
+    
+    return {
+      flowGraph: {
+        ...state.flowGraph,
+        keyframes: updatedKeyframes,
+        regions: updatedRegions,
         metadata: updateMetadata(state.flowGraph.metadata),
       },
     };

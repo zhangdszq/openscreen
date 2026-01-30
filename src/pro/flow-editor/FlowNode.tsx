@@ -11,6 +11,10 @@ interface FlowNodeProps {
   keyframe: KeyframeCapture;
   isSelected: boolean;
   isHovered: boolean;
+  /** When true, node won't capture mouse events (for marquee selection through nodes) */
+  pointerEventsNone?: boolean;
+  /** Current zoom level for Figma-style scaling */
+  zoom?: number;
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
@@ -34,6 +38,8 @@ export function FlowNode({
   keyframe,
   isSelected,
   isHovered,
+  pointerEventsNone = false,
+  zoom = 1,
   onMouseDown,
   onMouseEnter,
   onMouseLeave,
@@ -42,6 +48,9 @@ export function FlowNode({
   onLabelChange,
   onStickyResize,
 }: FlowNodeProps) {
+  // Figma style: border/ring width stays visually constant regardless of zoom
+  const ringWidth = 2 / zoom;
+  const hoverRingWidth = 1 / zoom;
   const position = keyframe.flowPosition || { x: 0, y: 0 };
   const stickySize = keyframe.stickySize || { width: DEFAULT_STICKY_WIDTH, height: DEFAULT_STICKY_HEIGHT };
   
@@ -145,14 +154,14 @@ export function FlowNode({
       style={{
         left: position.x,
         top: position.y,
+        pointerEvents: pointerEventsNone ? 'none' : 'auto',
       }}
     >
       {/* Sticky Note - Positioned above the node, expands upward */}
       <div
         className={cn(
           "absolute px-2 py-1.5 rounded-md transition-all",
-          "bg-[#FEF3C7] shadow-sm border border-[#F59E0B]/30",
-          isSelected && "ring-1 ring-[#34B27B]",
+          "bg-[#FEF3C7] shadow-sm",
           isEditing ? "cursor-text" : "cursor-pointer"
         )}
         style={{
@@ -160,6 +169,8 @@ export function FlowNode({
           height: localSize.height,
           bottom: NODE_HEIGHT + STICKY_OFFSET,
           left: 0,
+          border: `${1 / zoom}px solid rgba(245, 158, 11, 0.3)`,
+          boxShadow: isSelected ? `0 0 0 ${1 / zoom}px #34B27B` : 'none',
         }}
         onClick={handleStickyClick}
         onMouseDown={(e) => e.stopPropagation()}
@@ -210,14 +221,15 @@ export function FlowNode({
 
       {/* Node Container - Fixed position */}
       <div
-        className={cn(
-          "bg-[#1a1a1c] rounded-lg overflow-hidden cursor-move transition-shadow",
-          isSelected && "ring-2 ring-[#34B27B]",
-          isHovered && !isSelected && "ring-1 ring-white/30"
-        )}
+        className="bg-[#1a1a1c] rounded-lg overflow-hidden cursor-move transition-shadow"
         style={{
           width: NODE_WIDTH,
           height: NODE_HEIGHT,
+          boxShadow: isSelected 
+            ? `0 0 0 ${ringWidth}px #34B27B` 
+            : isHovered 
+              ? `0 0 0 ${hoverRingWidth}px rgba(255, 255, 255, 0.3)` 
+              : 'none',
         }}
         onMouseDown={onMouseDown}
         onMouseEnter={onMouseEnter}

@@ -3,6 +3,7 @@ import { fixWebmDuration } from "@fix-webm-duration/fix";
 
 export type CameraShape = "circle" | "rectangle";
 export type CameraPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+export type CameraBorderStyle = "white" | "shadow";
 
 export interface CameraSettings {
   enabled: boolean;
@@ -10,6 +11,8 @@ export interface CameraSettings {
   shape: CameraShape;
   size: number; // percentage of screen width (5-30%)
   position: CameraPosition;
+  borderStyle: CameraBorderStyle;
+  shadowIntensity: number; // 0-100, shadow strength when borderStyle is 'shadow'
 }
 
 export interface MicrophoneSettings {
@@ -47,6 +50,8 @@ const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
   shape: "circle",
   size: 15, // 15% of screen width
   position: "bottom-right",
+  borderStyle: "shadow", // Mac-style shadow by default
+  shadowIntensity: 60, // Default shadow intensity (0-100)
 };
 
 const DEFAULT_MICROPHONE_SETTINGS: MicrophoneSettings = {
@@ -335,19 +340,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         console.warn('Failed to get source bounds:', error);
       }
 
-      // Position camera preview within the window area if camera is enabled
-      if (cameraSettings.enabled && window.electronAPI?.positionCameraPreviewInArea && sourceBounds) {
-        try {
-          await window.electronAPI.positionCameraPreviewInArea({
-            area: sourceBounds,
-            size: cameraSettings.size,
-            shape: cameraSettings.shape,
-            position: cameraSettings.position,
-          });
-        } catch (error) {
-          console.warn('Failed to position camera preview:', error);
-        }
-      }
+      // Camera preview position is no longer adjusted when recording starts
+      // The user controls the camera position before recording begins
 
       // Start mouse tracking for auto-zoom feature
       if (sourceBounds && window.electronAPI?.startMouseTracking) {
@@ -472,7 +466,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       setRecording(true);
       window.electronAPI?.setRecordingState(true);
       
-      // Update camera preview to show recording indicator
+      // Notify camera preview of recording state (for locking position/size)
       if (cameraSettings.enabled) {
         window.electronAPI?.updateCameraPreview?.({ recording: true });
       }

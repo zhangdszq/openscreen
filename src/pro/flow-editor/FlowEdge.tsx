@@ -12,6 +12,7 @@ interface FlowEdgeProps {
   toKeyframe?: KeyframeCapture;
   toRegion?: FlowRegion;
   isSelected: boolean;
+  zoom: number;
   onClick: () => void;
 }
 
@@ -41,6 +42,7 @@ export function FlowEdge({
   toKeyframe,
   toRegion,
   isSelected,
+  zoom,
   onClick,
 }: FlowEdgeProps) {
   const fromBounds = getNodeBounds(fromKeyframe, fromRegion);
@@ -60,17 +62,20 @@ export function FlowEdge({
   
   const path = `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`;
 
-  // Arrow head
-  const arrowSize = 8;
+  // Arrow head - Figma style: visual size stays constant regardless of zoom
+  const arrowSize = 8 / zoom;
   const angle = Math.atan2(endY - (endY), endX - (endX - controlOffset));
 
   const baseColor = connection.style?.color || '#34B27B';
   const color = isSelected ? '#34B27B' : baseColor;
+  
+  // Figma style: stroke width stays visually constant regardless of zoom
   const baseStrokeWidth = connection.style?.strokeWidth || 2;
-  const strokeWidth = isSelected ? baseStrokeWidth + 2 : baseStrokeWidth;
+  const visualStrokeWidth = isSelected ? baseStrokeWidth + 1 : baseStrokeWidth;
+  const strokeWidth = visualStrokeWidth / zoom;
 
-  // Arrow size scales with stroke width when selected
-  const selectedArrowSize = isSelected ? arrowSize + 2 : arrowSize;
+  // Arrow size scales with selection but stays visually constant with zoom
+  const selectedArrowSize = isSelected ? arrowSize * 1.2 : arrowSize;
   const selectedArrowPoints = [
     { x: endX, y: endY },
     { 
@@ -83,6 +88,10 @@ export function FlowEdge({
     },
   ];
 
+  // Hit area and dash pattern scale with zoom
+  const hitAreaWidth = 20 / zoom;
+  const dashArray = connection.style?.dashed ? `${5 / zoom},${5 / zoom}` : undefined;
+
   return (
     <g 
       className="cursor-pointer" 
@@ -94,7 +103,7 @@ export function FlowEdge({
         d={path}
         fill="none"
         stroke="transparent"
-        strokeWidth={20}
+        strokeWidth={hitAreaWidth}
         style={{ pointerEvents: 'stroke' }}
       />
       
@@ -104,7 +113,7 @@ export function FlowEdge({
         fill="none"
         stroke={color}
         strokeWidth={strokeWidth}
-        strokeDasharray={connection.style?.dashed ? '5,5' : undefined}
+        strokeDasharray={dashArray}
         className="transition-all"
       />
 
@@ -138,6 +147,7 @@ interface FlowEdgePreviewProps {
   fromRegion?: FlowRegion;
   endX: number;
   endY: number;
+  zoom: number;
 }
 
 export function FlowEdgePreview({
@@ -145,6 +155,7 @@ export function FlowEdgePreview({
   fromRegion,
   endX,
   endY,
+  zoom,
 }: FlowEdgePreviewProps) {
   const fromBounds = getNodeBounds(fromKeyframe, fromRegion);
   if (!fromBounds) return null;
@@ -157,13 +168,17 @@ export function FlowEdgePreview({
   
   const path = `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`;
 
+  // Figma style: visual stroke width stays constant
+  const strokeWidth = 2 / zoom;
+  const dashArray = `${5 / zoom},${5 / zoom}`;
+
   return (
     <path
       d={path}
       fill="none"
       stroke="#34B27B"
-      strokeWidth={2}
-      strokeDasharray="5,5"
+      strokeWidth={strokeWidth}
+      strokeDasharray={dashArray}
       className="opacity-60"
     />
   );

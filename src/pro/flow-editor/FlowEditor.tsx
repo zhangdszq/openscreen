@@ -31,6 +31,9 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
     selectKeyframe,
     selectRegion,
     selectConnection,
+    selectAllKeyframes,
+    selectAllItems,
+    selectItemsInRect,
     clearSelection,
     addConnection,
     addRegion,
@@ -47,6 +50,10 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
     canUndo,
     canRedo,
     pushHistory,
+    createGroup,
+    ungroup,
+    getGroupForItem,
+    moveGroupItems,
   } = useKeyframeStore();
 
   const {
@@ -57,8 +64,13 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
     connectionPreview,
     drawMode,
     drawingRegion,
+    selectionRect,
+    isSpacePressed,
+    isAltPressed,
     setHoveredNodeId,
     setDrawMode,
+    setIsSpacePressed,
+    setIsAltPressed,
     handleWheel,
     startCanvasDrag,
     startNodeDrag,
@@ -74,20 +86,37 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
   const connections = flowGraph.connections;
 
   // Handle node position change (keyframes or regions)
+  // If the node is in a group, move all items in the group together
   const handleNodeMove = useCallback((nodeId: string, deltaX: number, deltaY: number) => {
     // Check if it's a keyframe
     const keyframe = keyframes.find(kf => kf.id === nodeId);
     if (keyframe) {
-      const currentPos = keyframe.flowPosition || { x: 0, y: 0 };
-      updateKeyframePosition(nodeId, currentPos.x + deltaX, currentPos.y + deltaY);
+      // Check if this keyframe is in a group
+      const group = getGroupForItem(nodeId, 'keyframe');
+      if (group) {
+        // Move all items in the group
+        moveGroupItems(group.id, deltaX, deltaY);
+      } else {
+        // Move only this keyframe
+        const currentPos = keyframe.flowPosition || { x: 0, y: 0 };
+        updateKeyframePosition(nodeId, currentPos.x + deltaX, currentPos.y + deltaY);
+      }
       return;
     }
     // Check if it's a region
     const region = regions.find(r => r.id === nodeId);
     if (region) {
-      updateRegionPosition(nodeId, region.position.x + deltaX, region.position.y + deltaY);
+      // Check if this region is in a group
+      const group = getGroupForItem(nodeId, 'region');
+      if (group) {
+        // Move all items in the group
+        moveGroupItems(group.id, deltaX, deltaY);
+      } else {
+        // Move only this region
+        updateRegionPosition(nodeId, region.position.x + deltaX, region.position.y + deltaY);
+      }
     }
-  }, [keyframes, regions, updateKeyframePosition, updateRegionPosition]);
+  }, [keyframes, regions, updateKeyframePosition, updateRegionPosition, getGroupForItem, moveGroupItems]);
 
   // Handle connection creation with type info
   const handleConnectionCreate = useCallback((from: string, to: string, fromType?: 'keyframe' | 'region', toType?: 'keyframe' | 'region') => {
@@ -176,6 +205,15 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Space key - enable hand tool for panning
+      if (e.key === ' ' && !e.repeat) {
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+      // Alt/Option key - enable marquee selection through nodes
+      if (e.key === 'Alt' && !e.repeat) {
+        setIsAltPressed(true);
+      }
       // Delete
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedKeyframeIds.length > 0 || selectedRegionIds.length > 0 || selectedConnectionIds.length > 0) {
@@ -205,18 +243,57 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
           redo();
         }
       }
-      // Tool shortcuts
-      if (e.key === 'v' || e.key === 'V') {
-        setDrawMode('select');
+      // Select All: Cmd/Ctrl + A
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        selectAllItems();
       }
-      if (e.key === 'r' || e.key === 'R') {
-        setDrawMode('region');
+      // Group: Cmd/Ctrl + G
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G') && !e.shiftKey) {
+        e.preventDefault();
+        if (selectedKeyframeIds.length + selectedRegionIds.length >= 2) {
+          pushHistory(flowGraph);
+          createGroup();
+        }
+      }
+      // Ungroup: Cmd/Ctrl + Shift + G
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G') && e.shiftKey) {
+        e.preventDefault();
+        pushHistory(flowGraph);
+        ungroup();
+      }
+      // Tool shortcuts (only when not pressing space and no modifier keys)
+      if (!e.repeat && e.key !== ' ' && !e.metaKey && !e.ctrlKey) {
+        if (e.key === 'v' || e.key === 'V') {
+          setDrawMode('select');
+        }
+        if (e.key === 'r' || e.key === 'R') {
+          setDrawMode('region');
+        }
+        if (e.key === 'h' || e.key === 'H') {
+          setDrawMode('hand');
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // Release space key - disable hand tool
+      if (e.key === ' ') {
+        setIsSpacePressed(false);
+      }
+      // Release Alt key - disable marquee through nodes
+      if (e.key === 'Alt') {
+        setIsAltPressed(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedKeyframeIds, selectedRegionIds, selectedConnectionIds, handleDeleteSelected, clearSelection, drawMode, setDrawMode, undo, redo, canUndo, canRedo]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [selectedKeyframeIds, selectedRegionIds, selectedConnectionIds, handleDeleteSelected, clearSelection, drawMode, setDrawMode, undo, redo, canUndo, canRedo, selectAllItems, setIsSpacePressed, setIsAltPressed, flowGraph, pushHistory, createGroup, ungroup]);
 
   // Fit to view on initial render
   useEffect(() => {
@@ -226,6 +303,17 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasSelection = selectedKeyframeIds.length > 0 || selectedRegionIds.length > 0 || selectedConnectionIds.length > 0;
+  const groups = flowGraph.groups || [];
+  
+  // Check if selected items can be grouped (need at least 2 items and none already in a group)
+  const canGroupSelection = (selectedKeyframeIds.length + selectedRegionIds.length >= 2) && 
+    !selectedKeyframeIds.some(id => groups.some(g => g.keyframeIds.includes(id))) &&
+    !selectedRegionIds.some(id => groups.some(g => g.regionIds.includes(id)));
+  
+  // Check if any selected item is in a group (can ungroup)
+  const canUngroupSelection = 
+    selectedKeyframeIds.some(id => groups.some(g => g.keyframeIds.includes(id))) ||
+    selectedRegionIds.some(id => groups.some(g => g.regionIds.includes(id)));
 
   return (
     <div className="fixed inset-0 z-50 bg-[#09090b] flex flex-col">
@@ -233,8 +321,11 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
       <FlowToolbar
         zoom={viewport.zoom}
         hasSelection={hasSelection}
+        canGroup={canGroupSelection}
+        canUngroup={canUngroupSelection}
         keyframeCount={keyframes.length}
         regionCount={regions.length}
+        groupCount={groups.length}
         connectionCount={connections.length}
         drawMode={drawMode}
         canUndo={canUndo()}
@@ -245,6 +336,14 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
         onResetView={resetViewport}
         onAutoLayout={autoLayoutKeyframes}
         onDeleteSelected={handleDeleteSelected}
+        onGroup={() => {
+          pushHistory(flowGraph);
+          createGroup();
+        }}
+        onUngroup={() => {
+          pushHistory(flowGraph);
+          ungroup();
+        }}
         onSetDrawMode={setDrawMode}
         onUndo={undo}
         onRedo={redo}
@@ -262,22 +361,34 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
       <div
         ref={containerRef}
         className={`flex-1 overflow-hidden relative mt-16 ${
-          drawMode === 'region' ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
+          drawMode === 'region' 
+            ? 'cursor-crosshair' 
+            : drawMode === 'hand' || isSpacePressed
+              ? 'cursor-grab active:cursor-grabbing' 
+              : 'cursor-default'
         }`}
         onWheel={handleWheel}
         onMouseDown={(e) => {
-          // Only handle canvas background clicks
+          // Handle middle mouse button anywhere for panning
+          if (e.button === 1) {
+            e.preventDefault();
+            startCanvasDrag(e);
+            return;
+          }
+          // Only handle canvas background clicks for left button
           const target = e.target as HTMLElement;
           if (target === e.currentTarget || target.closest('[data-canvas-bg]')) {
-            if (drawMode === 'select') {
+            // Only clear selection when starting a new selection (not when panning)
+            if (drawMode === 'select' && !isSpacePressed && e.button === 0) {
               clearSelection();
             }
             startCanvasDrag(e);
           }
         }}
+        onContextMenu={(e) => e.preventDefault()}
         onMouseMove={(e) => handleMouseMove(e, handleNodeMove)}
-        onMouseUp={() => handleMouseUp(hoveredNodeId || undefined, handleConnectionCreate, handleRegionDrawComplete)}
-        onMouseLeave={() => handleMouseUp(undefined, handleConnectionCreate, handleRegionDrawComplete)}
+        onMouseUp={() => handleMouseUp(hoveredNodeId || undefined, handleConnectionCreate, handleRegionDrawComplete, selectItemsInRect)}
+        onMouseLeave={() => handleMouseUp(undefined, handleConnectionCreate, handleRegionDrawComplete, selectItemsInRect)}
       >
         {/* Grid background */}
         <div
@@ -307,8 +418,10 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
               keyframe={keyframe}
               isSelected={selectedKeyframeIds.includes(keyframe.id)}
               isHovered={hoveredNodeId === keyframe.id}
+              pointerEventsNone={isAltPressed}
+              zoom={viewport.zoom}
               onMouseDown={(e) => {
-                selectKeyframe(keyframe.id, e.metaKey || e.ctrlKey);
+                selectKeyframe(keyframe.id, e.metaKey || e.ctrlKey || e.shiftKey);
                 startNodeDrag(e, keyframe.id);
               }}
               onMouseEnter={() => setHoveredNodeId(keyframe.id)}
@@ -333,6 +446,7 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
               region={region}
               isSelected={selectedRegionIds.includes(region.id)}
               isHovered={hoveredNodeId === region.id}
+              zoom={viewport.zoom}
               onMouseDown={(e) => {
                 selectRegion(region.id, e.metaKey || e.ctrlKey);
                 startNodeDrag(e, region.id);
@@ -388,6 +502,7 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
                     toKeyframe={toKf || undefined}
                     toRegion={toRegion || undefined}
                     isSelected={selectedConnectionIds.includes(conn.id)}
+                    zoom={viewport.zoom}
                     onClick={() => selectConnection(conn.id)}
                   />
                 );
@@ -400,20 +515,36 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
                   fromRegion={regions.find(r => r.id === connectionPreview.startId)}
                   endX={connectionPreview.endX}
                   endY={connectionPreview.endY}
+                  zoom={viewport.zoom}
                 />
               )}
             </g>
           </svg>
 
-          {/* Drawing region preview */}
+          {/* Drawing region preview - Figma style: border stays visually constant */}
           {drawingRegion && (
             <div
-              className="absolute border-2 border-dashed border-[#34B27B] bg-[#34B27B]/10 rounded-lg pointer-events-none"
+              className="absolute bg-[#34B27B]/10 rounded-lg pointer-events-none"
               style={{
                 left: Math.min(drawingRegion.startX, drawingRegion.endX),
                 top: Math.min(drawingRegion.startY, drawingRegion.endY),
                 width: Math.abs(drawingRegion.endX - drawingRegion.startX),
                 height: Math.abs(drawingRegion.endY - drawingRegion.startY),
+                border: `${2 / viewport.zoom}px dashed #34B27B`,
+              }}
+            />
+          )}
+
+          {/* Selection rectangle preview - Figma style: border stays visually constant */}
+          {selectionRect && (
+            <div
+              className="absolute bg-blue-400/10 rounded pointer-events-none"
+              style={{
+                left: Math.min(selectionRect.startX, selectionRect.endX),
+                top: Math.min(selectionRect.startY, selectionRect.endY),
+                width: Math.abs(selectionRect.endX - selectionRect.startX),
+                height: Math.abs(selectionRect.endY - selectionRect.startY),
+                border: `${1 / viewport.zoom}px solid rgba(96, 165, 250, 0.8)`,
               }}
             />
           )}
@@ -430,9 +561,9 @@ export function FlowEditor({ onClose, onExport }: FlowEditorProps) {
         )}
       </div>
 
-      {/* Help text */}
+      {/* Help text - use ⌘/Ctrl notation for cross-platform */}
       <div className="absolute bottom-4 left-4 text-xs text-slate-500">
-        <span>V 选择 • R 绘制区域 • 拖拽移动 • 从右侧拖出连线 • Cmd+Z 撤销 • Cmd+Shift+Z 重做</span>
+        <span>V 选择 • H 抓手 • R 区域 • ⌘/Ctrl+G 编组 • ⌘/Ctrl+Shift+G 解组 • ⌘/Ctrl+A 全选 • 空格 平移</span>
       </div>
     </div>
   );

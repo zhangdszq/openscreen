@@ -11,6 +11,8 @@ interface FlowRegionProps {
   region: FlowRegionType;
   isSelected: boolean;
   isHovered: boolean;
+  /** Current zoom level for Figma-style scaling */
+  zoom?: number;
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
@@ -38,6 +40,7 @@ export function FlowRegion({
   region,
   isSelected,
   isHovered,
+  zoom = 1,
   onMouseDown,
   onMouseEnter,
   onMouseLeave,
@@ -45,6 +48,10 @@ export function FlowRegion({
   onMouseUp,
   onResize,
 }: FlowRegionProps) {
+  // Figma style: border/ring width stays visually constant regardless of zoom
+  const borderWidth = 2 / zoom;
+  const ringWidth = 2 / zoom;
+  const hoverRingWidth = 1 / zoom;
   const [isResizing, setIsResizing] = useState(false);
   const [localSize, setLocalSize] = useState(region.size);
   const resizeStartRef = React.useRef<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -106,20 +113,21 @@ export function FlowRegion({
 
   return (
     <div
-      className={cn(
-        "absolute rounded-lg cursor-move transition-shadow",
-        isSelected && "ring-2 ring-[#34B27B]",
-        isHovered && !isSelected && "ring-1 ring-white/30"
-      )}
+      className="absolute rounded-lg cursor-move transition-shadow"
       style={{
         left: region.position.x,
         top: region.position.y,
         width: localSize.width,
         height: localSize.height,
         backgroundColor: bgColor,
-        borderWidth: 2,
+        borderWidth: borderWidth,
         borderStyle: region.borderStyle || 'dashed',
         borderColor: borderColor,
+        boxShadow: isSelected 
+          ? `0 0 0 ${ringWidth}px #34B27B` 
+          : isHovered 
+            ? `0 0 0 ${hoverRingWidth}px rgba(255, 255, 255, 0.3)` 
+            : 'none',
       }}
       onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}

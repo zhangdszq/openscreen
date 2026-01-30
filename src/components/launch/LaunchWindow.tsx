@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import styles from "./LaunchWindow.module.css";
-import { useScreenRecorder, CameraShape, CameraPosition } from "../../hooks/useScreenRecorder";
+import { useScreenRecorder, CameraShape, CameraPosition, CameraBorderStyle } from "../../hooks/useScreenRecorder";
 import { Button } from "../ui/button";
 import { BsRecordCircle } from "react-icons/bs";
 import { FaRegStopCircle } from "react-icons/fa";
@@ -41,18 +41,44 @@ export function LaunchWindow() {
     }
   }, [cameraPreviewStream]);
 
-  // Control external camera preview window
+  // Show/hide camera preview window based on enabled state
   useEffect(() => {
     if (cameraSettings.enabled) {
-      // Show external camera preview window
+      // Show external camera preview window with initial settings
       window.electronAPI?.showCameraPreview?.({
         size: cameraSettings.size,
         shape: cameraSettings.shape,
         position: cameraSettings.position,
+        borderStyle: cameraSettings.borderStyle,
+        shadowIntensity: cameraSettings.shadowIntensity,
       });
     } else {
       // Hide camera preview window when disabled
       window.electronAPI?.hideCameraPreview?.();
+    }
+    // Only depend on enabled state - other settings are updated separately
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraSettings.enabled]);
+
+  // Update camera preview settings without resetting position
+  // Only update borderStyle and shadowIntensity (visual-only changes)
+  useEffect(() => {
+    if (cameraSettings.enabled) {
+      window.electronAPI?.updateCameraPreview?.({
+        borderStyle: cameraSettings.borderStyle,
+        shadowIntensity: cameraSettings.shadowIntensity,
+      });
+    }
+  }, [cameraSettings.enabled, cameraSettings.borderStyle, cameraSettings.shadowIntensity]);
+
+  // Update camera preview size/shape/position (these may affect window bounds)
+  useEffect(() => {
+    if (cameraSettings.enabled) {
+      window.electronAPI?.updateCameraPreview?.({
+        size: cameraSettings.size,
+        shape: cameraSettings.shape,
+        position: cameraSettings.position,
+      });
     }
   }, [cameraSettings.enabled, cameraSettings.size, cameraSettings.shape, cameraSettings.position]);
 
@@ -105,6 +131,14 @@ export function LaunchWindow() {
 
   const handleShapeChange = (shape: CameraShape) => {
     setCameraSettings(prev => ({ ...prev, shape }));
+  };
+
+  const handleBorderStyleChange = (borderStyle: CameraBorderStyle) => {
+    setCameraSettings(prev => ({ ...prev, borderStyle }));
+  };
+
+  const handleShadowIntensityChange = (value: number[]) => {
+    setCameraSettings(prev => ({ ...prev, shadowIntensity: value[0] }));
   };
 
   const handleSizeChange = (value: number[]) => {
@@ -317,6 +351,50 @@ export function LaunchWindow() {
                     </button>
                   </div>
                 </div>
+
+                {/* Border Style Selection */}
+                <div className="space-y-2">
+                  <label className="text-xs text-zinc-400">边框样式</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleBorderStyleChange('shadow')}
+                      className={`flex-1 py-2 px-3 rounded text-xs flex items-center justify-center gap-2 ${
+                        cameraSettings.borderStyle === 'shadow' 
+                          ? 'bg-green-600 text-white' 
+                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                      }`}
+                    >
+                      <div className="w-4 h-4 rounded-full bg-zinc-600" style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.3)' }} />
+                      阴影
+                    </button>
+                    <button
+                      onClick={() => handleBorderStyleChange('white')}
+                      className={`flex-1 py-2 px-3 rounded text-xs flex items-center justify-center gap-2 ${
+                        cameraSettings.borderStyle === 'white' 
+                          ? 'bg-green-600 text-white' 
+                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                      }`}
+                    >
+                      <div className="w-4 h-4 rounded-full border-2 border-white bg-zinc-600" />
+                      白框
+                    </button>
+                  </div>
+                </div>
+
+                {/* Shadow Intensity Slider (only show when shadow style is selected) */}
+                {cameraSettings.borderStyle === 'shadow' && (
+                  <div className="space-y-2">
+                    <label className="text-xs text-zinc-400">阴影强度: {cameraSettings.shadowIntensity}%</label>
+                    <Slider
+                      value={[cameraSettings.shadowIntensity]}
+                      onValueChange={handleShadowIntensityChange}
+                      min={0}
+                      max={100}
+                      step={5}
+                      className="w-full"
+                    />
+                  </div>
+                )}
 
                 {/* Size Slider */}
                 <div className="space-y-2">
