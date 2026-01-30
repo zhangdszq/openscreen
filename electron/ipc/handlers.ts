@@ -286,4 +286,148 @@ export function registerIpcHandlers(
       return { success: false, error: 'No mouse events file found' };
     }
   });
+
+  // ============================================================================
+  // Pro Feature Handlers - Keyframes and Flow Graph
+  // ============================================================================
+
+  // Save a single keyframe image
+  ipcMain.handle('save-keyframe-image', async (_, imageData: string, fileName: string) => {
+    try {
+      // Create keyframes directory if it doesn't exist
+      const keyframesDir = path.join(RECORDINGS_DIR, 'keyframes');
+      await fs.mkdir(keyframesDir, { recursive: true });
+
+      // Convert base64 to buffer
+      const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      const filePath = path.join(keyframesDir, fileName);
+      await fs.writeFile(filePath, buffer);
+
+      return { success: true, path: filePath };
+    } catch (error) {
+      console.error('Failed to save keyframe image:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  // Save flow graph data
+  ipcMain.handle('save-flow-graph', async (_, flowGraphJson: string, fileName: string) => {
+    try {
+      const flowGraphsDir = path.join(RECORDINGS_DIR, 'flowgraphs');
+      await fs.mkdir(flowGraphsDir, { recursive: true });
+
+      const filePath = path.join(flowGraphsDir, fileName);
+      await fs.writeFile(filePath, flowGraphJson, 'utf-8');
+
+      return { success: true, path: filePath };
+    } catch (error) {
+      console.error('Failed to save flow graph:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  // Load flow graph data
+  ipcMain.handle('load-flow-graph', async (_, filePath: string) => {
+    try {
+      const data = await fs.readFile(filePath, 'utf-8');
+      return { success: true, data: JSON.parse(data) };
+    } catch (error) {
+      console.error('Failed to load flow graph:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  // List available flow graphs
+  ipcMain.handle('list-flow-graphs', async () => {
+    try {
+      const flowGraphsDir = path.join(RECORDINGS_DIR, 'flowgraphs');
+      
+      try {
+        await fs.access(flowGraphsDir);
+      } catch {
+        return { success: true, files: [] };
+      }
+
+      const files = await fs.readdir(flowGraphsDir);
+      const jsonFiles = files.filter(f => f.endsWith('.json'));
+
+      const flowGraphs = await Promise.all(
+        jsonFiles.map(async (fileName) => {
+          const filePath = path.join(flowGraphsDir, fileName);
+          const stat = await fs.stat(filePath);
+          
+          try {
+            const content = await fs.readFile(filePath, 'utf-8');
+            const data = JSON.parse(content);
+            return {
+              fileName,
+              path: filePath,
+              name: data.name || fileName.replace('.json', ''),
+              keyframeCount: data.keyframes?.length || 0,
+              connectionCount: data.connections?.length || 0,
+              createdAt: data.metadata?.createdAt || stat.birthtime.getTime(),
+              updatedAt: data.metadata?.updatedAt || stat.mtime.getTime(),
+            };
+          } catch {
+            return {
+              fileName,
+              path: filePath,
+              name: fileName.replace('.json', ''),
+              keyframeCount: 0,
+              connectionCount: 0,
+              createdAt: stat.birthtime.getTime(),
+              updatedAt: stat.mtime.getTime(),
+            };
+          }
+        })
+      );
+
+      return { success: true, files: flowGraphs };
+    } catch (error) {
+      console.error('Failed to list flow graphs:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  // Export flow graph as ZIP (Figma package)
+  ipcMain.handle('export-flow-graph-zip', async (_, zipData: ArrayBuffer, fileName: string) => {
+    try {
+      const result = await dialog.showSaveDialog({
+        title: '导出流程图',
+        defaultPath: path.join(app.getPath('downloads'), fileName),
+        filters: [
+          { name: 'ZIP Archive', extensions: ['zip'] }
+        ],
+        properties: ['createDirectory', 'showOverwriteConfirmation']
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, cancelled: true, message: 'Export cancelled' };
+      }
+
+      await fs.writeFile(result.filePath, Buffer.from(zipData));
+
+      return {
+        success: true,
+        path: result.filePath,
+        message: 'Flow graph exported successfully'
+      };
+    } catch (error) {
+      console.error('Failed to export flow graph ZIP:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  // Delete a flow graph
+  ipcMain.handle('delete-flow-graph', async (_, filePath: string) => {
+    try {
+      await fs.unlink(filePath);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to delete flow graph:', error);
+      return { success: false, error: String(error) };
+    }
+  });
 }

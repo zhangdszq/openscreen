@@ -150,3 +150,139 @@ export interface MouseTrackData {
 
 export const DEFAULT_CLICK_ZOOM_DURATION_MS = 2000; // total duration of zoom for a click
 export const DEFAULT_CLICK_ZOOM_LEAD_MS = 300;      // start zoom this many ms before click
+
+// ============================================================================
+// Keyframe Capture Types (Pro Feature)
+// ============================================================================
+
+/**
+ * Source of keyframe capture
+ */
+export type KeyframeCaptureSource = 'click' | 'manual' | 'auto' | 'mcp';
+
+/**
+ * Metadata associated with a keyframe
+ */
+export interface KeyframeMetadata {
+  /** Page URL (available in MCP browser mode) */
+  pageUrl?: string;
+  /** Page title (available in MCP browser mode) */
+  pageTitle?: string;
+  /** Description of the clicked element */
+  elementInfo?: string;
+  /** Custom user notes */
+  notes?: string;
+}
+
+/**
+ * A captured keyframe from the video
+ */
+export interface KeyframeCapture {
+  /** Unique identifier */
+  id: string;
+  /** Timestamp in milliseconds relative to video start */
+  timestampMs: number;
+  /** How this keyframe was captured */
+  source: KeyframeCaptureSource;
+  /** Exported image file path (if saved to disk) */
+  imagePath?: string;
+  /** Base64 encoded image data (for in-memory use) */
+  imageData?: string;
+  /** Image dimensions */
+  imageDimensions?: { width: number; height: number };
+  /** Mouse position at capture time (normalized 0-1) */
+  mousePosition?: { x: number; y: number };
+  /** Additional metadata */
+  metadata?: KeyframeMetadata;
+  /** User-defined label for this keyframe */
+  label?: string;
+  /** Position in flow graph canvas */
+  flowPosition?: { x: number; y: number };
+  /** Creation timestamp */
+  createdAt: number;
+}
+
+/**
+ * Connection between two keyframes in a flow graph
+ */
+export interface FlowConnection {
+  /** Unique identifier */
+  id: string;
+  /** Source keyframe ID */
+  from: string;
+  /** Target keyframe ID */
+  to: string;
+  /** Optional label for the connection */
+  label?: string;
+  /** Connection line style */
+  style?: {
+    color?: string;
+    strokeWidth?: number;
+    dashed?: boolean;
+  };
+}
+
+/**
+ * Flow graph containing keyframes and their connections
+ */
+export interface FlowGraph {
+  /** Graph identifier */
+  id: string;
+  /** Graph name */
+  name: string;
+  /** All keyframes in the graph */
+  keyframes: KeyframeCapture[];
+  /** Connections between keyframes */
+  connections: FlowConnection[];
+  /** Graph metadata */
+  metadata?: {
+    /** Associated video path */
+    videoPath?: string;
+    /** Project name */
+    projectName?: string;
+    /** Description */
+    description?: string;
+    /** Creation timestamp */
+    createdAt: number;
+    /** Last modified timestamp */
+    updatedAt: number;
+  };
+  /** Canvas viewport state */
+  viewport?: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+}
+
+/**
+ * Default values for keyframe capture
+ */
+export const DEFAULT_KEYFRAME_LABEL = '关键帧';
+
+/**
+ * Default flow graph viewport
+ */
+export const DEFAULT_FLOW_VIEWPORT = {
+  x: 0,
+  y: 0,
+  zoom: 1,
+};
+
+/**
+ * Create a new empty flow graph
+ */
+export function createEmptyFlowGraph(name: string = '未命名流程图'): FlowGraph {
+  const now = Date.now();
+  return {
+    id: `flow-${now}`,
+    name,
+    keyframes: [],
+    connections: [],
+    metadata: {
+      createdAt: now,
+      updatedAt: now,
+    },
+    viewport: { ...DEFAULT_FLOW_VIEWPORT },
+  };
+}

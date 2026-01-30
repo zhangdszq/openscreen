@@ -122,5 +122,24 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   loadMouseEvents: (videoPath) => {
     return electron.ipcRenderer.invoke("load-mouse-events", videoPath);
+  },
+  // Pro Feature APIs - Keyframes and Flow Graph
+  saveKeyframeImage: (imageData, fileName) => {
+    return electron.ipcRenderer.invoke("save-keyframe-image", imageData, fileName);
+  },
+  saveFlowGraph: (flowGraphJson, fileName) => {
+    return electron.ipcRenderer.invoke("save-flow-graph", flowGraphJson, fileName);
+  },
+  loadFlowGraph: (filePath) => {
+    return electron.ipcRenderer.invoke("load-flow-graph", filePath);
+  },
+  listFlowGraphs: () => {
+    return electron.ipcRenderer.invoke("list-flow-graphs");
+  },
+  exportFlowGraphZip: (zipData, fileName) => {
+    return electron.ipcRenderer.invoke("export-flow-graph-zip", zipData, fileName);
+  },
+  deleteFlowGraph: (filePath) => {
+    return electron.ipcRenderer.invoke("delete-flow-graph", filePath);
   }
 });

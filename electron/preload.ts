@@ -133,4 +133,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadMouseEvents: (videoPath: string) => {
     return ipcRenderer.invoke('load-mouse-events', videoPath)
   },
+
+  // Pro Feature APIs - Keyframes and Flow Graph
+  saveKeyframeImage: (imageData: string, fileName: string) => {
+    return ipcRenderer.invoke('save-keyframe-image', imageData, fileName)
+  },
+  saveFlowGraph: (flowGraphJson: string, fileName: string) => {
+    return ipcRenderer.invoke('save-flow-graph', flowGraphJson, fileName)
+  },
+  loadFlowGraph: (filePath: string) => {
+    return ipcRenderer.invoke('load-flow-graph', filePath)
+  },
+  listFlowGraphs: () => {
+    return ipcRenderer.invoke('list-flow-graphs')
+  },
+  exportFlowGraphZip: (zipData: ArrayBuffer, fileName: string) => {
+    return ipcRenderer.invoke('export-flow-graph-zip', zipData, fileName)
+  },
+  deleteFlowGraph: (filePath: string) => {
+    return ipcRenderer.invoke('delete-flow-graph', filePath)
+  },
 })

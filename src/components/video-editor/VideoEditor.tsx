@@ -1,5 +1,4 @@
 
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -36,6 +35,11 @@ import { VideoExporter, GifExporter, type ExportProgress, type ExportQuality, ty
 import { type AspectRatio, getAspectRatioValue } from "@/utils/aspectRatioUtils";
 import { getAssetPath } from "@/lib/assetPath";
 
+// Pro Feature imports
+import { Feature, isFeatureEnabled } from "@/lib/features";
+import { FeatureGate } from "@/components/common/FeatureGate";
+import { KeyframePanel, FlowEditor, useKeyframeStore, downloadFigmaPackage } from "@/pro";
+
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_PATHS = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `/wallpapers/wallpaper${i + 1}.jpg`);
 
@@ -70,6 +74,11 @@ export default function VideoEditor() {
   const [gifLoop, setGifLoop] = useState(true);
   const [gifSizePreset, setGifSizePreset] = useState<GifSizePreset>('medium');
   const [mouseClickEvents, setMouseClickEvents] = useState<RecordedMouseEvent[]>([]);
+  
+  // Pro feature state
+  const [showFlowEditor, setShowFlowEditor] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<'settings' | 'keyframes'>('settings');
+  const flowGraph = useKeyframeStore(state => state.flowGraph);
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
   const nextZoomIdRef = useRef(1);
@@ -470,6 +479,35 @@ export default function VideoEditor() {
       toast.info('No new zoom regions could be added (all positions overlap with existing)');
     }
   }, [mouseClickEvents, duration, zoomRegions]);
+
+  // Pro feature handlers
+  const handleOpenFlowEditor = useCallback(() => {
+    setShowFlowEditor(true);
+  }, []);
+
+  const handleCloseFlowEditor = useCallback(() => {
+    setShowFlowEditor(false);
+  }, []);
+
+  const handleExportFlowGraph = useCallback(async () => {
+    try {
+      await downloadFigmaPackage(flowGraph, {
+        projectName: '竞品分析流程图',
+        description: `从视频 ${videoPath} 提取的关键帧流程图`,
+      });
+      toast.success('流程图导出成功');
+    } catch (error) {
+      console.error('Failed to export flow graph:', error);
+      toast.error('导出失败: ' + String(error));
+    }
+  }, [flowGraph, videoPath]);
+
+  const handleSeekFromKeyframe = useCallback((timeMs: number) => {
+    const video = videoPlaybackRef.current?.video;
+    if (video) {
+      video.currentTime = timeMs / 1000;
+    }
+  }, []);
   
   // Global Tab prevention
   useEffect(() => {
@@ -871,55 +909,98 @@ export default function VideoEditor() {
           </PanelGroup>
         </div>
 
-          {/* Right section: settings panel */}
-          <SettingsPanel
-          selected={wallpaper}
-          onWallpaperChange={setWallpaper}
-          selectedZoomDepth={selectedZoomId ? zoomRegions.find(z => z.id === selectedZoomId)?.depth : null}
-          onZoomDepthChange={(depth) => selectedZoomId && handleZoomDepthChange(depth)}
-          selectedZoomId={selectedZoomId}
-          onZoomDelete={handleZoomDelete}
-          selectedTrimId={selectedTrimId}
-          onTrimDelete={handleTrimDelete}
-          shadowIntensity={shadowIntensity}
-          onShadowChange={setShadowIntensity}
-          showBlur={showBlur}
-          onBlurChange={setShowBlur}
-          motionBlurEnabled={motionBlurEnabled}
-          onMotionBlurChange={setMotionBlurEnabled}
-          borderRadius={borderRadius}
-          onBorderRadiusChange={setBorderRadius}
-          padding={padding}
-          onPaddingChange={setPadding}
-          cropRegion={cropRegion}
-          onCropChange={setCropRegion}
-          aspectRatio={aspectRatio}
-          videoElement={videoPlaybackRef.current?.video || null}
-          exportQuality={exportQuality}
-          onExportQualityChange={setExportQuality}
-          exportFormat={exportFormat}
-          onExportFormatChange={setExportFormat}
-          gifFrameRate={gifFrameRate}
-          onGifFrameRateChange={setGifFrameRate}
-          gifLoop={gifLoop}
-          onGifLoopChange={setGifLoop}
-          gifSizePreset={gifSizePreset}
-          onGifSizePresetChange={setGifSizePreset}
-          gifOutputDimensions={calculateOutputDimensions(
-            videoPlaybackRef.current?.video?.videoWidth || 1920,
-            videoPlaybackRef.current?.video?.videoHeight || 1080,
-            gifSizePreset,
-            GIF_SIZE_PRESETS
-          )}
-          onExport={handleOpenExportDialog}
-          selectedAnnotationId={selectedAnnotationId}
-          annotationRegions={annotationRegions}
-          onAnnotationContentChange={handleAnnotationContentChange}
-          onAnnotationTypeChange={handleAnnotationTypeChange}
-          onAnnotationStyleChange={handleAnnotationStyleChange}
-          onAnnotationFigureDataChange={handleAnnotationFigureDataChange}
-          onAnnotationDelete={handleAnnotationDelete}
-        />
+          {/* Right section: settings panel with Pro features tab */}
+          <div className="flex-[2] min-w-0 flex flex-col h-full">
+            {/* Tab switcher for Pro features */}
+            <FeatureGate feature={Feature.PRO_KEYFRAME_EXTRACT}>
+              <div className="flex mb-2 bg-white/5 rounded-lg p-1">
+                <button
+                  onClick={() => setRightPanelTab('settings')}
+                  className={`flex-1 py-1.5 px-3 text-xs font-medium rounded-md transition-colors ${
+                    rightPanelTab === 'settings'
+                      ? 'bg-white/10 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  设置
+                </button>
+                <button
+                  onClick={() => setRightPanelTab('keyframes')}
+                  className={`flex-1 py-1.5 px-3 text-xs font-medium rounded-md transition-colors ${
+                    rightPanelTab === 'keyframes'
+                      ? 'bg-[#34B27B]/20 text-[#34B27B]'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  关键帧
+                  <span className="ml-1 px-1 py-0.5 text-[9px] bg-gradient-to-r from-amber-500 to-orange-500 text-black font-bold rounded uppercase">Pro</span>
+                </button>
+              </div>
+            </FeatureGate>
+
+            {/* Panel content */}
+            {rightPanelTab === 'settings' ? (
+              <SettingsPanel
+                selected={wallpaper}
+                onWallpaperChange={setWallpaper}
+                selectedZoomDepth={selectedZoomId ? zoomRegions.find(z => z.id === selectedZoomId)?.depth : null}
+                onZoomDepthChange={(depth) => selectedZoomId && handleZoomDepthChange(depth)}
+                selectedZoomId={selectedZoomId}
+                onZoomDelete={handleZoomDelete}
+                selectedTrimId={selectedTrimId}
+                onTrimDelete={handleTrimDelete}
+                shadowIntensity={shadowIntensity}
+                onShadowChange={setShadowIntensity}
+                showBlur={showBlur}
+                onBlurChange={setShowBlur}
+                motionBlurEnabled={motionBlurEnabled}
+                onMotionBlurChange={setMotionBlurEnabled}
+                borderRadius={borderRadius}
+                onBorderRadiusChange={setBorderRadius}
+                padding={padding}
+                onPaddingChange={setPadding}
+                cropRegion={cropRegion}
+                onCropChange={setCropRegion}
+                aspectRatio={aspectRatio}
+                videoElement={videoPlaybackRef.current?.video || null}
+                exportQuality={exportQuality}
+                onExportQualityChange={setExportQuality}
+                exportFormat={exportFormat}
+                onExportFormatChange={setExportFormat}
+                gifFrameRate={gifFrameRate}
+                onGifFrameRateChange={setGifFrameRate}
+                gifLoop={gifLoop}
+                onGifLoopChange={setGifLoop}
+                gifSizePreset={gifSizePreset}
+                onGifSizePresetChange={setGifSizePreset}
+                gifOutputDimensions={calculateOutputDimensions(
+                  videoPlaybackRef.current?.video?.videoWidth || 1920,
+                  videoPlaybackRef.current?.video?.videoHeight || 1080,
+                  gifSizePreset,
+                  GIF_SIZE_PRESETS
+                )}
+                onExport={handleOpenExportDialog}
+                selectedAnnotationId={selectedAnnotationId}
+                annotationRegions={annotationRegions}
+                onAnnotationContentChange={handleAnnotationContentChange}
+                onAnnotationTypeChange={handleAnnotationTypeChange}
+                onAnnotationStyleChange={handleAnnotationStyleChange}
+                onAnnotationFigureDataChange={handleAnnotationFigureDataChange}
+                onAnnotationDelete={handleAnnotationDelete}
+              />
+            ) : (
+              <div className="flex-1 bg-[#09090b] border border-white/5 rounded-2xl overflow-hidden">
+                <KeyframePanel
+                  videoRef={videoPlaybackRef as React.RefObject<{ video: HTMLVideoElement | null }>}
+                  currentTimeMs={Math.round(currentTime * 1000)}
+                  mouseTrackData={{ events: mouseClickEvents, screenBounds: { width: 1920, height: 1080 } }}
+                  onSeek={handleSeekFromKeyframe}
+                  onOpenFlowEditor={handleOpenFlowEditor}
+                  onExport={handleExportFlowGraph}
+                />
+              </div>
+            )}
+          </div>
       </div>
 
       <Toaster theme="dark" className="pointer-events-auto" />
@@ -933,6 +1014,14 @@ export default function VideoEditor() {
         onCancel={handleCancelExport}
         exportFormat={exportFormat}
       />
+
+      {/* Pro Feature: Flow Editor Modal */}
+      {showFlowEditor && isFeatureEnabled(Feature.PRO_FLOW_EDITOR) && (
+        <FlowEditor
+          onClose={handleCloseFlowEditor}
+          onExport={handleExportFlowGraph}
+        />
+      )}
     </div>
   );
 }

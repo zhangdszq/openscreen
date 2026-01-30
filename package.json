@@ -38,6 +38,7 @@
     "fix-webm-duration": "^1.0.6",
     "gif.js": "^0.2.0",
     "gsap": "^3.13.0",
+    "jszip": "^3.10.1",
     "koffi": "^2.15.1",
     "lucide-react": "^0.545.0",
     "mediabunny": "^1.25.1",
@@ -53,9 +54,11 @@
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
     "uiohook-napi": "^1.5.4",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@types/jszip": "^3.4.0",
     "@types/node": "^25.0.3",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
