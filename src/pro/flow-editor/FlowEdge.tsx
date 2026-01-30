@@ -1,34 +1,58 @@
 /**
- * FlowEdge - Connection line between nodes with arrow
+ * FlowEdge - Connection line between nodes (keyframes or regions) with arrow
  */
 
-import type { FlowConnection, KeyframeCapture } from '@/components/video-editor/types';
+import type { FlowConnection, KeyframeCapture, FlowRegion } from '@/components/video-editor/types';
 import { NODE_WIDTH, NODE_HEIGHT } from './FlowNode';
-import { cn } from '@/lib/utils';
 
 interface FlowEdgeProps {
   connection: FlowConnection;
-  fromKeyframe: KeyframeCapture;
-  toKeyframe: KeyframeCapture;
+  fromKeyframe?: KeyframeCapture;
+  fromRegion?: FlowRegion;
+  toKeyframe?: KeyframeCapture;
+  toRegion?: FlowRegion;
   isSelected: boolean;
   onClick: () => void;
+}
+
+/**
+ * Get the position and size of a node (keyframe or region)
+ */
+function getNodeBounds(keyframe?: KeyframeCapture, region?: FlowRegion): { x: number; y: number; width: number; height: number } | null {
+  if (keyframe) {
+    const pos = keyframe.flowPosition || { x: 0, y: 0 };
+    return { x: pos.x, y: pos.y, width: NODE_WIDTH, height: NODE_HEIGHT };
+  }
+  if (region) {
+    return { 
+      x: region.position.x, 
+      y: region.position.y, 
+      width: region.size.width, 
+      height: region.size.height 
+    };
+  }
+  return null;
 }
 
 export function FlowEdge({
   connection,
   fromKeyframe,
+  fromRegion,
   toKeyframe,
+  toRegion,
   isSelected,
   onClick,
 }: FlowEdgeProps) {
-  const fromPos = fromKeyframe.flowPosition || { x: 0, y: 0 };
-  const toPos = toKeyframe.flowPosition || { x: 0, y: 0 };
+  const fromBounds = getNodeBounds(fromKeyframe, fromRegion);
+  const toBounds = getNodeBounds(toKeyframe, toRegion);
+
+  if (!fromBounds || !toBounds) return null;
 
   // Calculate connection points (from right side to left side)
-  const startX = fromPos.x + NODE_WIDTH;
-  const startY = fromPos.y + NODE_HEIGHT / 2;
-  const endX = toPos.x;
-  const endY = toPos.y + NODE_HEIGHT / 2;
+  const startX = fromBounds.x + fromBounds.width;
+  const startY = fromBounds.y + fromBounds.height / 2;
+  const endX = toBounds.x;
+  const endY = toBounds.y + toBounds.height / 2;
 
   // Calculate bezier control points for smooth curve
   const dx = endX - startX;
@@ -39,30 +63,39 @@ export function FlowEdge({
   // Arrow head
   const arrowSize = 8;
   const angle = Math.atan2(endY - (endY), endX - (endX - controlOffset));
-  
-  const arrowPoints = [
+
+  const baseColor = connection.style?.color || '#34B27B';
+  const color = isSelected ? '#34B27B' : baseColor;
+  const baseStrokeWidth = connection.style?.strokeWidth || 2;
+  const strokeWidth = isSelected ? baseStrokeWidth + 2 : baseStrokeWidth;
+
+  // Arrow size scales with stroke width when selected
+  const selectedArrowSize = isSelected ? arrowSize + 2 : arrowSize;
+  const selectedArrowPoints = [
     { x: endX, y: endY },
     { 
-      x: endX - arrowSize * Math.cos(angle - Math.PI / 6), 
-      y: endY - arrowSize * Math.sin(angle - Math.PI / 6) 
+      x: endX - selectedArrowSize * Math.cos(angle - Math.PI / 6), 
+      y: endY - selectedArrowSize * Math.sin(angle - Math.PI / 6) 
     },
     { 
-      x: endX - arrowSize * Math.cos(angle + Math.PI / 6), 
-      y: endY - arrowSize * Math.sin(angle + Math.PI / 6) 
+      x: endX - selectedArrowSize * Math.cos(angle + Math.PI / 6), 
+      y: endY - selectedArrowSize * Math.sin(angle + Math.PI / 6) 
     },
   ];
 
-  const color = connection.style?.color || '#34B27B';
-  const strokeWidth = connection.style?.strokeWidth || 2;
-
   return (
-    <g className="cursor-pointer" onClick={onClick}>
+    <g 
+      className="cursor-pointer" 
+      onClick={onClick}
+      style={{ pointerEvents: 'auto' }}
+    >
       {/* Hit area (invisible, wider for easier clicking) */}
       <path
         d={path}
         fill="none"
         stroke="transparent"
-        strokeWidth={16}
+        strokeWidth={20}
+        style={{ pointerEvents: 'stroke' }}
       />
       
       {/* Visible line */}
@@ -72,20 +105,14 @@ export function FlowEdge({
         stroke={color}
         strokeWidth={strokeWidth}
         strokeDasharray={connection.style?.dashed ? '5,5' : undefined}
-        className={cn(
-          "transition-all",
-          isSelected && "filter drop-shadow-[0_0_4px_rgba(52,178,123,0.5)]"
-        )}
+        className="transition-all"
       />
 
       {/* Arrow head */}
       <polygon
-        points={arrowPoints.map(p => `${p.x},${p.y}`).join(' ')}
+        points={selectedArrowPoints.map(p => `${p.x},${p.y}`).join(' ')}
         fill={color}
-        className={cn(
-          "transition-all",
-          isSelected && "filter drop-shadow-[0_0_4px_rgba(52,178,123,0.5)]"
-        )}
+        className="transition-all"
       />
 
       {/* Label */}
@@ -107,20 +134,23 @@ export function FlowEdge({
  * Preview edge while creating connection
  */
 interface FlowEdgePreviewProps {
-  fromKeyframe: KeyframeCapture;
+  fromKeyframe?: KeyframeCapture;
+  fromRegion?: FlowRegion;
   endX: number;
   endY: number;
 }
 
 export function FlowEdgePreview({
   fromKeyframe,
+  fromRegion,
   endX,
   endY,
 }: FlowEdgePreviewProps) {
-  const fromPos = fromKeyframe.flowPosition || { x: 0, y: 0 };
+  const fromBounds = getNodeBounds(fromKeyframe, fromRegion);
+  if (!fromBounds) return null;
 
-  const startX = fromPos.x + NODE_WIDTH;
-  const startY = fromPos.y + NODE_HEIGHT / 2;
+  const startX = fromBounds.x + fromBounds.width;
+  const startY = fromBounds.y + fromBounds.height / 2;
 
   const dx = endX - startX;
   const controlOffset = Math.min(Math.abs(dx) * 0.5, 100);

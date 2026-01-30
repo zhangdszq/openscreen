@@ -2,7 +2,7 @@
  * FlowNode - Individual keyframe node in the flow graph
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ImageIcon, GripVertical, Link2 } from 'lucide-react';
 import type { KeyframeCapture } from '@/components/video-editor/types';
 import { cn } from '@/lib/utils';
@@ -17,11 +17,17 @@ interface FlowNodeProps {
   onConnectionStart: (e: React.MouseEvent) => void;
   onMouseUp: () => void;
   onLabelChange?: (id: string, label: string) => void;
+  onStickyResize?: (id: string, width: number, height: number) => void;
 }
 
 export const NODE_WIDTH = 180;
 export const NODE_HEIGHT = 100;
-const STICKY_HEIGHT = 32;
+const DEFAULT_STICKY_WIDTH = 180;
+const DEFAULT_STICKY_HEIGHT = 40;
+const MIN_STICKY_WIDTH = 120;
+const MIN_STICKY_HEIGHT = 32;
+const MAX_STICKY_WIDTH = 400;
+const MAX_STICKY_HEIGHT = 200;
 const STICKY_OFFSET = 8;
 
 export function FlowNode({
@@ -34,41 +40,102 @@ export function FlowNode({
   onConnectionStart,
   onMouseUp,
   onLabelChange,
+  onStickyResize,
 }: FlowNodeProps) {
   const position = keyframe.flowPosition || { x: 0, y: 0 };
+  const stickySize = keyframe.stickySize || { width: DEFAULT_STICKY_WIDTH, height: DEFAULT_STICKY_HEIGHT };
+  
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(keyframe.label || '');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [localSize, setLocalSize] = useState(stickySize);
+  
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
     setEditText(keyframe.label || '');
   }, [keyframe.label]);
 
   useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
+    setLocalSize(keyframe.stickySize || { width: DEFAULT_STICKY_WIDTH, height: DEFAULT_STICKY_HEIGHT });
+  }, [keyframe.stickySize]);
+
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.select();
     }
   }, [isEditing]);
 
-  const handleStickyDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsEditing(true);
-  };
-
-  const handleInputBlur = () => {
+  const handleTextareaBlur = () => {
     setIsEditing(false);
     if (onLabelChange && editText !== keyframe.label) {
       onLabelChange(keyframe.id, editText);
     }
   };
 
-  const handleInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleInputBlur();
-    } else if (e.key === 'Escape') {
+  const handleTextareaKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
       setEditText(keyframe.label || '');
       setIsEditing(false);
+    }
+    // Allow Enter for new lines, use Cmd/Ctrl+Enter to save
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      handleTextareaBlur();
+    }
+  };
+
+  // Resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    resizeStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: localSize.width,
+      height: localSize.height,
+    };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizeStartRef.current) return;
+      
+      const deltaX = moveEvent.clientX - resizeStartRef.current.x;
+      const deltaY = moveEvent.clientY - resizeStartRef.current.y;
+      
+      const newWidth = Math.min(MAX_STICKY_WIDTH, Math.max(MIN_STICKY_WIDTH, resizeStartRef.current.width + deltaX));
+      const newHeight = Math.min(MAX_STICKY_HEIGHT, Math.max(MIN_STICKY_HEIGHT, resizeStartRef.current.height + deltaY));
+      
+      setLocalSize({ width: newWidth, height: newHeight });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      if (resizeStartRef.current && onStickyResize) {
+        onStickyResize(keyframe.id, localSize.width, localSize.height);
+      }
+      resizeStartRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [keyframe.id, localSize, onStickyResize]);
+
+  // Save size when local size changes and not resizing
+  useEffect(() => {
+    if (!isResizing && onStickyResize && 
+        (localSize.width !== stickySize.width || localSize.height !== stickySize.height)) {
+      onStickyResize(keyframe.id, localSize.width, localSize.height);
+    }
+  }, [isResizing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleStickyClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isEditing) {
+      setIsEditing(true);
     }
   };
 
@@ -77,42 +144,71 @@ export function FlowNode({
       className="absolute"
       style={{
         left: position.x,
-        top: position.y - STICKY_HEIGHT - STICKY_OFFSET,
+        top: position.y,
       }}
     >
-      {/* Sticky Note - Above the node */}
+      {/* Sticky Note - Positioned above the node, expands upward */}
       <div
         className={cn(
-          "mb-2 px-2 py-1.5 rounded-md cursor-text transition-all",
+          "absolute px-2 py-1.5 rounded-md transition-all",
           "bg-[#FEF3C7] shadow-sm border border-[#F59E0B]/30",
-          isSelected && "ring-1 ring-[#34B27B]"
+          isSelected && "ring-1 ring-[#34B27B]",
+          isEditing ? "cursor-text" : "cursor-pointer"
         )}
         style={{
-          width: NODE_WIDTH,
-          minHeight: STICKY_HEIGHT,
+          width: localSize.width,
+          height: localSize.height,
+          bottom: NODE_HEIGHT + STICKY_OFFSET,
+          left: 0,
         }}
-        onDoubleClick={handleStickyDoubleClick}
+        onClick={handleStickyClick}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
+          <textarea
+            ref={textareaRef}
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
-            onBlur={handleInputBlur}
-            onKeyDown={handleInputKeyDown}
-            className="w-full bg-transparent text-[11px] text-amber-900 font-medium outline-none"
+            onBlur={handleTextareaBlur}
+            onKeyDown={handleTextareaKeyDown}
+            className="w-full h-full bg-transparent text-[11px] text-amber-900 font-medium outline-none resize-none leading-relaxed"
             placeholder="添加备注..."
           />
         ) : (
-          <p className="text-[11px] text-amber-900 font-medium truncate">
-            {keyframe.label || '双击添加备注...'}
+          <p 
+            className="text-[11px] text-amber-900 font-medium leading-relaxed whitespace-pre-wrap break-words overflow-hidden"
+            style={{ 
+              display: '-webkit-box',
+              WebkitLineClamp: Math.floor((localSize.height - 12) / 16),
+              WebkitBoxOrient: 'vertical',
+            }}
+          >
+            {keyframe.label || '点击添加备注...'}
           </p>
         )}
+
+        {/* Resize handle - bottom right corner */}
+        <div
+          className={cn(
+            "absolute bottom-0 right-0 w-4 h-4 cursor-se-resize",
+            "flex items-center justify-center",
+            "opacity-0 hover:opacity-100 transition-opacity",
+            (isSelected || isHovered) && "opacity-60"
+          )}
+          onMouseDown={handleResizeStart}
+        >
+          <svg width="8" height="8" viewBox="0 0 8 8" className="text-amber-700">
+            <path
+              d="M7 1L1 7M7 4L4 7M7 7L7 7"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
       </div>
 
-      {/* Node Container */}
+      {/* Node Container - Fixed position */}
       <div
         className={cn(
           "bg-[#1a1a1c] rounded-lg overflow-hidden cursor-move transition-shadow",

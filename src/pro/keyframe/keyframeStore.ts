@@ -10,6 +10,8 @@ import type {
   KeyframeCapture, 
   FlowGraph, 
   FlowConnection,
+  FlowRegion,
+  FlowEndpointType,
 } from '@/components/video-editor/types';
 import { createEmptyFlowGraph as createGraph } from '@/components/video-editor/types';
 
@@ -25,12 +27,19 @@ function updateMetadata(existingMetadata: FlowGraph['metadata']): NonNullable<Fl
   };
 }
 
+const MAX_HISTORY = 50;
+
 interface KeyframeState {
   // Current flow graph
   flowGraph: FlowGraph;
   
+  // History for undo/redo
+  history: FlowGraph[];
+  historyIndex: number;
+  
   // Selection state
   selectedKeyframeIds: string[];
+  selectedRegionIds: string[];
   selectedConnectionIds: string[];
   
   // UI state
@@ -48,13 +57,21 @@ interface KeyframeState {
   removeKeyframe: (id: string) => void;
   removeKeyframes: (ids: string[]) => void;
   
+  // Region actions
+  addRegion: (region: FlowRegion) => void;
+  updateRegion: (id: string, updates: Partial<FlowRegion>) => void;
+  removeRegion: (id: string) => void;
+  updateRegionPosition: (id: string, x: number, y: number) => void;
+  updateRegionSize: (id: string, width: number, height: number) => void;
+  
   // Connection actions
-  addConnection: (from: string, to: string, label?: string) => void;
+  addConnection: (from: string, to: string, label?: string, fromType?: FlowEndpointType, toType?: FlowEndpointType) => void;
   updateConnection: (id: string, updates: Partial<FlowConnection>) => void;
   removeConnection: (id: string) => void;
   
   // Selection actions
   selectKeyframe: (id: string, multi?: boolean) => void;
+  selectRegion: (id: string, multi?: boolean) => void;
   selectConnection: (id: string, multi?: boolean) => void;
   clearSelection: () => void;
   
@@ -65,20 +82,77 @@ interface KeyframeState {
   // Flow position helpers
   updateKeyframePosition: (id: string, x: number, y: number) => void;
   autoLayoutKeyframes: () => void;
+  
+  // History actions
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+  pushHistory: (graph: FlowGraph) => void;
 }
 
-export const useKeyframeStore = create<KeyframeState>((set) => ({
+export const useKeyframeStore = create<KeyframeState>((set, get) => ({
   flowGraph: createGraph(),
+  history: [],
+  historyIndex: -1,
   selectedKeyframeIds: [],
+  selectedRegionIds: [],
   selectedConnectionIds: [],
   isExtracting: false,
   extractionProgress: null,
+
+  // Push current state to history before making changes
+  pushHistory: (graph) => set((state) => {
+    // Remove any future history if we're not at the end
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(JSON.parse(JSON.stringify(graph)));
+    
+    // Limit history size
+    if (newHistory.length > MAX_HISTORY) {
+      newHistory.shift();
+    }
+    
+    return {
+      history: newHistory,
+      historyIndex: newHistory.length - 1,
+    };
+  }),
+
+  undo: () => set((state) => {
+    if (state.historyIndex <= 0) return state;
+    
+    const newIndex = state.historyIndex - 1;
+    const previousGraph = state.history[newIndex];
+    
+    return {
+      flowGraph: JSON.parse(JSON.stringify(previousGraph)),
+      historyIndex: newIndex,
+    };
+  }),
+
+  redo: () => set((state) => {
+    if (state.historyIndex >= state.history.length - 1) return state;
+    
+    const newIndex = state.historyIndex + 1;
+    const nextGraph = state.history[newIndex];
+    
+    return {
+      flowGraph: JSON.parse(JSON.stringify(nextGraph)),
+      historyIndex: newIndex,
+    };
+  }),
+
+  canUndo: () => get().historyIndex > 0,
+  canRedo: () => get().historyIndex < get().history.length - 1,
 
   setFlowGraph: (graph) => set({ flowGraph: graph }),
   
   resetFlowGraph: (name) => set({ 
     flowGraph: createGraph(name),
+    history: [],
+    historyIndex: -1,
     selectedKeyframeIds: [],
+    selectedRegionIds: [],
     selectedConnectionIds: [],
   }),
 
@@ -133,7 +207,59 @@ export const useKeyframeStore = create<KeyframeState>((set) => ({
     selectedKeyframeIds: state.selectedKeyframeIds.filter((kid) => !ids.includes(kid)),
   })),
 
-  addConnection: (from, to, label) => set((state) => {
+  // Region actions
+  addRegion: (region) => set((state) => ({
+    flowGraph: {
+      ...state.flowGraph,
+      regions: [...(state.flowGraph.regions || []), region],
+      metadata: updateMetadata(state.flowGraph.metadata),
+    },
+  })),
+
+  updateRegion: (id, updates) => set((state) => ({
+    flowGraph: {
+      ...state.flowGraph,
+      regions: (state.flowGraph.regions || []).map((r) =>
+        r.id === id ? { ...r, ...updates } : r
+      ),
+      metadata: updateMetadata(state.flowGraph.metadata),
+    },
+  })),
+
+  removeRegion: (id) => set((state) => ({
+    flowGraph: {
+      ...state.flowGraph,
+      regions: (state.flowGraph.regions || []).filter((r) => r.id !== id),
+      // Also remove connections involving this region
+      connections: state.flowGraph.connections.filter(
+        (conn) => conn.from !== id && conn.to !== id
+      ),
+      metadata: updateMetadata(state.flowGraph.metadata),
+    },
+    selectedRegionIds: state.selectedRegionIds.filter((rid) => rid !== id),
+  })),
+
+  updateRegionPosition: (id, x, y) => set((state) => ({
+    flowGraph: {
+      ...state.flowGraph,
+      regions: (state.flowGraph.regions || []).map((r) =>
+        r.id === id ? { ...r, position: { x, y } } : r
+      ),
+      metadata: updateMetadata(state.flowGraph.metadata),
+    },
+  })),
+
+  updateRegionSize: (id, width, height) => set((state) => ({
+    flowGraph: {
+      ...state.flowGraph,
+      regions: (state.flowGraph.regions || []).map((r) =>
+        r.id === id ? { ...r, size: { width, height } } : r
+      ),
+      metadata: updateMetadata(state.flowGraph.metadata),
+    },
+  })),
+
+  addConnection: (from, to, label, fromType = 'keyframe', toType = 'keyframe') => set((state) => {
     // Check if connection already exists
     const exists = state.flowGraph.connections.some(
       (conn) => conn.from === from && conn.to === to
@@ -143,7 +269,9 @@ export const useKeyframeStore = create<KeyframeState>((set) => ({
     const newConnection: FlowConnection = {
       id: uuidv4(),
       from,
+      fromType,
       to,
+      toType,
       label,
     };
 
@@ -181,6 +309,17 @@ export const useKeyframeStore = create<KeyframeState>((set) => ({
         ? state.selectedKeyframeIds.filter((kid) => kid !== id)
         : [...state.selectedKeyframeIds, id]
       : [id],
+    selectedRegionIds: multi ? state.selectedRegionIds : [],
+    selectedConnectionIds: multi ? state.selectedConnectionIds : [],
+  })),
+
+  selectRegion: (id, multi = false) => set((state) => ({
+    selectedRegionIds: multi
+      ? state.selectedRegionIds.includes(id)
+        ? state.selectedRegionIds.filter((rid) => rid !== id)
+        : [...state.selectedRegionIds, id]
+      : [id],
+    selectedKeyframeIds: multi ? state.selectedKeyframeIds : [],
     selectedConnectionIds: multi ? state.selectedConnectionIds : [],
   })),
 
@@ -191,10 +330,12 @@ export const useKeyframeStore = create<KeyframeState>((set) => ({
         : [...state.selectedConnectionIds, id]
       : [id],
     selectedKeyframeIds: multi ? state.selectedKeyframeIds : [],
+    selectedRegionIds: multi ? state.selectedRegionIds : [],
   })),
 
   clearSelection: () => set({
     selectedKeyframeIds: [],
+    selectedRegionIds: [],
     selectedConnectionIds: [],
   }),
 

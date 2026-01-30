@@ -7,6 +7,8 @@
 import { useState, useCallback, useRef } from 'react';
 import type { KeyframeCapture } from '@/components/video-editor/types';
 
+export type DrawMode = 'select' | 'region';
+
 export interface ViewportState {
   x: number;
   y: number;
@@ -15,11 +17,18 @@ export interface ViewportState {
 
 export interface DragState {
   isDragging: boolean;
-  dragType: 'node' | 'canvas' | 'connection' | null;
+  dragType: 'node' | 'canvas' | 'connection' | 'draw-region' | null;
   startX: number;
   startY: number;
   nodeId?: string;
   connectionStart?: string;
+}
+
+export interface DrawingRegion {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
 }
 
 export interface FlowEditorState {
@@ -27,10 +36,12 @@ export interface FlowEditorState {
   drag: DragState;
   hoveredNodeId: string | null;
   connectionPreview: { startId: string; endX: number; endY: number } | null;
+  drawMode: DrawMode;
+  drawingRegion: DrawingRegion | null;
 }
 
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 2;
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 10;
 const ZOOM_SENSITIVITY = 0.001;
 
 export function useFlowEditor() {
@@ -47,6 +58,8 @@ export function useFlowEditor() {
     endX: number;
     endY: number;
   } | null>(null);
+  const [drawMode, setDrawMode] = useState<DrawMode>('select');
+  const [drawingRegion, setDrawingRegion] = useState<DrawingRegion | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -97,15 +110,33 @@ export function useFlowEditor() {
     }
   }, [viewport]);
 
-  // Start canvas drag
+  // Start canvas drag or region drawing
   const startCanvasDrag = useCallback((e: React.MouseEvent) => {
-    setDrag({
-      isDragging: true,
-      dragType: 'canvas',
-      startX: e.clientX - viewport.x,
-      startY: e.clientY - viewport.y,
-    });
-  }, [viewport]);
+    if (drawMode === 'region') {
+      // Start drawing a region
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      setDrag({
+        isDragging: true,
+        dragType: 'draw-region',
+        startX: e.clientX,
+        startY: e.clientY,
+      });
+      setDrawingRegion({
+        startX: canvasPos.x,
+        startY: canvasPos.y,
+        endX: canvasPos.x,
+        endY: canvasPos.y,
+      });
+    } else {
+      // Normal canvas pan
+      setDrag({
+        isDragging: true,
+        dragType: 'canvas',
+        startX: e.clientX - viewport.x,
+        startY: e.clientY - viewport.y,
+      });
+    }
+  }, [viewport, drawMode, screenToCanvas]);
 
   // Start node drag
   const startNodeDrag = useCallback((e: React.MouseEvent, nodeId: string) => {
@@ -167,18 +198,40 @@ export function useFlowEditor() {
         endX: canvasPos.x,
         endY: canvasPos.y,
       });
+    } else if (drag.dragType === 'draw-region' && drawingRegion) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      setDrawingRegion(prev => prev ? {
+        ...prev,
+        endX: canvasPos.x,
+        endY: canvasPos.y,
+      } : null);
     }
-  }, [drag, viewport.zoom, screenToCanvas]);
+  }, [drag, viewport.zoom, screenToCanvas, drawingRegion]);
 
   // Handle mouse up
   const handleMouseUp = useCallback((
     targetNodeId?: string,
-    onConnectionCreate?: (from: string, to: string) => void
+    onConnectionCreate?: (from: string, to: string) => void,
+    onRegionDrawComplete?: (x: number, y: number, width: number, height: number) => void
   ) => {
     if (drag.dragType === 'connection' && drag.connectionStart && targetNodeId) {
       if (drag.connectionStart !== targetNodeId) {
         onConnectionCreate?.(drag.connectionStart, targetNodeId);
       }
+    } else if (drag.dragType === 'draw-region' && drawingRegion && onRegionDrawComplete) {
+      // Calculate region bounds (normalize to ensure positive width/height)
+      const x = Math.min(drawingRegion.startX, drawingRegion.endX);
+      const y = Math.min(drawingRegion.startY, drawingRegion.endY);
+      const width = Math.abs(drawingRegion.endX - drawingRegion.startX);
+      const height = Math.abs(drawingRegion.endY - drawingRegion.startY);
+      
+      // Only create if region is large enough
+      if (width > 20 && height > 20) {
+        onRegionDrawComplete(x, y, width, height);
+      }
+      
+      // Switch back to select mode after drawing
+      setDrawMode('select');
     }
 
     setDrag({
@@ -188,7 +241,8 @@ export function useFlowEditor() {
       startY: 0,
     });
     setConnectionPreview(null);
-  }, [drag]);
+    setDrawingRegion(null);
+  }, [drag, drawingRegion]);
 
   // Reset viewport
   const resetViewport = useCallback(() => {
@@ -239,7 +293,10 @@ export function useFlowEditor() {
     drag,
     hoveredNodeId,
     connectionPreview,
+    drawMode,
+    drawingRegion,
     setHoveredNodeId,
+    setDrawMode,
     screenToCanvas,
     canvasToScreen,
     handleWheel,

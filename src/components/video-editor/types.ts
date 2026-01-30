@@ -198,20 +198,51 @@ export interface KeyframeCapture {
   label?: string;
   /** Position in flow graph canvas */
   flowPosition?: { x: number; y: number };
+  /** Sticky note size (width, height) */
+  stickySize?: { width: number; height: number };
   /** Creation timestamp */
   createdAt: number;
 }
 
 /**
- * Connection between two keyframes in a flow graph
+ * A region/area in the flow graph (rectangle for grouping)
+ */
+export interface FlowRegion {
+  /** Unique identifier */
+  id: string;
+  /** Region label */
+  label?: string;
+  /** Position on canvas */
+  position: { x: number; y: number };
+  /** Size of the region */
+  size: { width: number; height: number };
+  /** Background color */
+  color?: string;
+  /** Border style */
+  borderStyle?: 'solid' | 'dashed';
+  /** Creation timestamp */
+  createdAt: number;
+}
+
+/**
+ * Connection endpoint type
+ */
+export type FlowEndpointType = 'keyframe' | 'region';
+
+/**
+ * Connection between nodes (keyframes or regions) in a flow graph
  */
 export interface FlowConnection {
   /** Unique identifier */
   id: string;
-  /** Source keyframe ID */
+  /** Source node ID */
   from: string;
-  /** Target keyframe ID */
+  /** Source node type */
+  fromType?: FlowEndpointType;
+  /** Target node ID */
   to: string;
+  /** Target node type */
+  toType?: FlowEndpointType;
   /** Optional label for the connection */
   label?: string;
   /** Connection line style */
@@ -223,7 +254,7 @@ export interface FlowConnection {
 }
 
 /**
- * Flow graph containing keyframes and their connections
+ * Flow graph containing keyframes, regions and their connections
  */
 export interface FlowGraph {
   /** Graph identifier */
@@ -232,7 +263,9 @@ export interface FlowGraph {
   name: string;
   /** All keyframes in the graph */
   keyframes: KeyframeCapture[];
-  /** Connections between keyframes */
+  /** All regions in the graph */
+  regions?: FlowRegion[];
+  /** Connections between keyframes/regions */
   connections: FlowConnection[];
   /** Graph metadata */
   metadata?: {

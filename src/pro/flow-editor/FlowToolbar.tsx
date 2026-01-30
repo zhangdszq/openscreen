@@ -12,20 +12,32 @@ import {
   Download,
   Layout,
   X,
+  Square,
+  MousePointer2,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { DrawMode } from './useFlowEditor';
 
 interface FlowToolbarProps {
   zoom: number;
   hasSelection: boolean;
   keyframeCount: number;
   connectionCount: number;
+  regionCount: number;
+  drawMode: DrawMode;
+  canUndo: boolean;
+  canRedo: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFitToView: () => void;
   onResetView: () => void;
   onAutoLayout: () => void;
   onDeleteSelected: () => void;
+  onSetDrawMode: (mode: DrawMode) => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onExport: () => void;
   onClose: () => void;
 }
@@ -35,22 +47,64 @@ export function FlowToolbar({
   hasSelection,
   keyframeCount,
   connectionCount,
+  regionCount,
+  drawMode,
+  canUndo,
+  canRedo,
   onZoomIn,
   onZoomOut,
   onFitToView,
   onResetView,
   onAutoLayout,
   onDeleteSelected,
+  onSetDrawMode,
+  onUndo,
+  onRedo,
   onExport,
   onClose,
 }: FlowToolbarProps) {
   return (
     <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-50 pointer-events-auto">
-      {/* Left section - title and stats */}
+      {/* Left section - title, tools and stats */}
       <div className="flex items-center gap-4">
         <h2 className="text-lg font-semibold text-slate-200">流程图编辑器</h2>
+        
+        {/* Tool selection */}
+        <div className="flex items-center gap-1 bg-black/40 rounded-lg p-1">
+          <ToolbarButton
+            icon={<MousePointer2 className="w-4 h-4" />}
+            onClick={() => onSetDrawMode('select')}
+            title="选择工具"
+            active={drawMode === 'select'}
+          />
+          <ToolbarButton
+            icon={<Square className="w-4 h-4" />}
+            onClick={() => onSetDrawMode('region')}
+            title="绘制区域"
+            active={drawMode === 'region'}
+          />
+        </div>
+
+        {/* Undo/Redo */}
+        <div className="flex items-center gap-1 bg-black/40 rounded-lg p-1">
+          <ToolbarButton
+            icon={<Undo2 className="w-4 h-4" />}
+            onClick={onUndo}
+            title="撤销 (Cmd+Z)"
+            disabled={!canUndo}
+          />
+          <ToolbarButton
+            icon={<Redo2 className="w-4 h-4" />}
+            onClick={onRedo}
+            title="重做 (Cmd+Shift+Z)"
+            disabled={!canRedo}
+          />
+        </div>
+
         <div className="flex items-center gap-2 text-xs text-slate-400">
           <span>{keyframeCount} 关键帧</span>
+          <span>•</span>
+          <span>{regionCount} 区域</span>
           <span>•</span>
           <span>{connectionCount} 连接</span>
         </div>
@@ -120,6 +174,7 @@ interface ToolbarButtonProps {
   onClick: () => void;
   title: string;
   disabled?: boolean;
+  active?: boolean;
   variant?: 'default' | 'danger';
 }
 
@@ -128,6 +183,7 @@ function ToolbarButton({
   onClick,
   title,
   disabled = false,
+  active = false,
   variant = 'default',
 }: ToolbarButtonProps) {
   return (
@@ -138,8 +194,9 @@ function ToolbarButton({
       className={cn(
         "p-2 rounded-md transition-colors",
         disabled && "opacity-50 cursor-not-allowed",
-        variant === 'default' && "text-slate-300 hover:text-white hover:bg-white/10",
-        variant === 'danger' && "text-red-400 hover:text-red-300 hover:bg-red-500/20"
+        active && "bg-[#34B27B] text-white",
+        !active && variant === 'default' && "text-slate-300 hover:text-white hover:bg-white/10",
+        !active && variant === 'danger' && "text-red-400 hover:text-red-300 hover:bg-red-500/20"
       )}
     >
       {icon}
