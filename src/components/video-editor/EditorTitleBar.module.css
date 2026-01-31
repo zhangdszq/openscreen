@@ -1,0 +1,75 @@
+.electronDrag {
+  -webkit-app-region: drag;
+}
+
+.electronNoDrag {
+  -webkit-app-region: no-drag;
+}
+
+/* 标题栏样式 - 与 LaunchWindow 一致 */
+.titleBar {
+  background: rgba(9, 9, 11, 0.95);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 分隔线 */
+.divider {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 下拉菜单内容 - 毛玻璃效果 */
+.menuContent {
+  background: rgba(28, 28, 30, 0.98) !important;
+  backdrop-filter: blur(50px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(50px) saturate(200%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+  padding: 6px !important;
+  min-width: 180px !important;
+  box-shadow: 
+    0 20px 40px -8px rgba(0, 0, 0, 0.5),
+    0 8px 16px -4px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset !important;
+}
+
+/* 菜单项 */
+.menuItem {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.menuItem:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: white !important;
+}
+
+.menuItem:focus {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: white !important;
+  outline: none !important;
+}
+
+.menuItem[data-disabled] {
+  color: rgba(255, 255, 255, 0.25) !important;
+  cursor: not-allowed !important;
+}
+
+.menuItem[data-disabled]:hover {
+  background: transparent !important;
+}
+
+/* 菜单分隔线 */
+.menuSeparator {
+  height: 1px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  margin: 6px 0 !important;
+}

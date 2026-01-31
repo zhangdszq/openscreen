@@ -9,6 +9,8 @@ import PlaybackControls from "./PlaybackControls";
 import TimelineEditor from "./timeline/TimelineEditor";
 import { SettingsPanel } from "./SettingsPanel";
 import { ExportDialog } from "./ExportDialog";
+import { LeftToolbar, type ActivePanel } from "./LeftToolbar";
+import { getLayoutConfig } from "./types";
 
 import type { Span } from "dnd-timeline";
 import {
@@ -34,6 +36,7 @@ import {
   type CameraOverlay,
 } from "./types";
 import PictureInPicture from "./PictureInPicture";
+import { EditorTitleBar } from "./EditorTitleBar";
 import { 
   VideoExporter, 
   GifExporter, 
@@ -94,12 +97,17 @@ export default function VideoEditor() {
   const [cameraOverlay, setCameraOverlay] = useState<CameraOverlay>(DEFAULT_CAMERA_OVERLAY);
   const [cameraVideoPath, setCameraVideoPath] = useState<string | null>(null);
   
+  // Left toolbar panel state
+  const [activeToolbarPanel, setActiveToolbarPanel] = useState<ActivePanel>(null);
+  
   // Pro feature state
   const [showFlowEditor, setShowFlowEditor] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<'settings' | 'keyframes'>('settings');
   const flowGraph = useKeyframeStore(state => state.flowGraph);
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const [splitContainerSize, setSplitContainerSize] = useState({ width: 0, height: 0 });
   const nextZoomIdRef = useRef(1);
   const nextTrimIdRef = useRef(1);
   const nextAnnotationIdRef = useRef(1);
@@ -545,6 +553,10 @@ export default function VideoEditor() {
   // Camera overlay handlers
   const handleCameraOverlayChange = useCallback((overlay: CameraOverlay) => {
     setCameraOverlay(overlay);
+    // 分屏模式时自动将 padding 设为 0
+    if (overlay.layoutMode.startsWith('split-')) {
+      setPadding(0);
+    }
   }, []);
 
   // Pro feature handlers
@@ -626,6 +638,22 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
     }
   }, [selectedAnnotationId, annotationRegions]);
+
+  // 监听分屏容器尺寸变化
+  useEffect(() => {
+    const container = splitContainerRef.current;
+    if (!container) return;
+    
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setSplitContainerSize({ width, height });
+      }
+    });
+    
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   const handleExport = useCallback(async (settings: ExportSettings) => {
     if (!videoPath) {
@@ -895,94 +923,478 @@ export default function VideoEditor() {
 
   return (
     <div className="flex flex-col h-screen bg-[#09090b] text-slate-200 overflow-hidden selection:bg-[#34B27B]/30">
-      <div 
-        className="h-10 flex-shrink-0 bg-[#09090b]/80 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-6 z-50"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-      >
-        <div className="flex-1" />
-      </div>
+      <EditorTitleBar 
+        onExport={handleOpenExportDialog}
+      />
 
       <div className="flex-1 p-5 gap-4 flex min-h-0 relative">
-        {/* Left Column - Video & Timeline */}
-        <div className="flex-[7] flex flex-col gap-3 min-w-0 h-full">
+        {/* Left Toolbar */}
+        <LeftToolbar
+          cameraOverlay={cameraOverlay}
+          onCameraOverlayChange={handleCameraOverlayChange}
+          cameraVideoPath={cameraVideoPath}
+          activePanel={activeToolbarPanel}
+          onActivePanelChange={setActiveToolbarPanel}
+        />
+
+        {/* Center Column - Video & Timeline */}
+        <div className="flex-[7] flex flex-col gap-3 min-w-0 h-full transition-all duration-300">
           <PanelGroup direction="vertical" className="gap-3">
             {/* Top section: video preview and controls */}
             <Panel defaultSize={70} minSize={40}>
               <div className="w-full h-full flex flex-col items-center justify-center bg-black/40 rounded-2xl border border-white/5 shadow-2xl overflow-hidden">
                 {/* Video preview */}
                 <div className="w-full flex justify-center items-center" style={{ flex: '1 1 auto', margin: '6px 0 0' }}>
-                  <div className="relative" style={{ width: 'auto', height: '100%', aspectRatio: getAspectRatioValue(aspectRatio), maxWidth: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
-                    {/* Camera overlay (picture-in-picture) */}
-                    {cameraOverlay.enabled && cameraOverlay.videoPath && videoPlaybackRef.current?.containerRef?.current && (
-                      <PictureInPicture
-                        overlay={cameraOverlay}
-                        onOverlayChange={handleCameraOverlayChange}
-                        containerWidth={videoPlaybackRef.current.containerRef.current.clientWidth}
-                        containerHeight={videoPlaybackRef.current.containerRef.current.clientHeight}
-                        currentTimeMs={Math.round(currentTime * 1000)}
-                        isPlaying={isPlaying}
-                        videoDurationMs={Math.round(duration * 1000)}
+                  {(() => {
+                    const layoutConfig = getLayoutConfig(cameraOverlay.layoutMode);
+                    const isSplitMode = layoutConfig.isSplit && cameraOverlay.enabled && cameraOverlay.videoPath;
+                    const splitRatio = cameraOverlay.splitRatio;
+                    const isHorizontal = cameraOverlay.layoutMode === 'split-left' || cameraOverlay.layoutMode === 'split-right';
+                    const cameraFirst = cameraOverlay.layoutMode === 'split-left' || cameraOverlay.layoutMode === 'split-top';
+
+                    // 计算背景样式
+                    const getBackgroundStyle = () => {
+                      if (!wallpaper) return {};
+                      const isImageUrl = wallpaper.startsWith('file://') || wallpaper.startsWith('http') || wallpaper.startsWith('/') || wallpaper.startsWith('data:');
+                      return isImageUrl
+                        ? { backgroundImage: `url(${wallpaper})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                        : { background: wallpaper };
+                    };
+
+                    // 摄像头视频样式
+                    const getCameraVideoStyle = () => {
+                      const boxShadow = cameraOverlay.borderStyle === 'shadow' 
+                        ? '0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3)'
+                        : cameraOverlay.borderStyle === 'white'
+                          ? '0 0 0 3px rgba(255,255,255,0.8)'
+                          : 'none';
+                      
+                      return {
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover' as const,
+                        transform: cameraOverlay.mirror ? 'scaleX(-1)' : 'none',
+                        borderRadius: `${cameraOverlay.borderRadius}px`,
+                        boxShadow,
+                      };
+                    };
+
+                    // 获取缩放值和位置偏移（兼容旧数据）
+                    const cameraScale = cameraOverlay.cameraScale ?? 0.9;
+                    const screenScale = cameraOverlay.screenScale ?? 0.9;
+                    const cameraOffset = cameraOverlay.cameraOffset ?? { x: 0, y: 0 };
+                    const screenOffset = cameraOverlay.screenOffset ?? { x: 0, y: 0 };
+
+                    // 拖拽处理 - 摄像头（直接跟随鼠标，无边界限制）
+                    const handleCameraDragStart = (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const startOffset = { ...cameraOffset };
+                      
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        // 直接使用像素差值，无限制
+                        const deltaX = moveEvent.clientX - startX;
+                        const deltaY = moveEvent.clientY - startY;
+                        const newOffset = {
+                          x: startOffset.x + deltaX,
+                          y: startOffset.y + deltaY,
+                        };
+                        setCameraOverlay(prev => ({ ...prev, cameraOffset: newOffset }));
+                      };
+                      
+                      const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                      };
+                      
+                      document.body.style.cursor = 'grabbing';
+                      document.body.style.userSelect = 'none';
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                    };
+
+                    // 拖拽处理 - 录屏（直接跟随鼠标，无边界限制）
+                    const handleScreenDragStart = (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const startOffset = { ...screenOffset };
+                      
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        // 直接使用像素差值，无限制
+                        const deltaX = moveEvent.clientX - startX;
+                        const deltaY = moveEvent.clientY - startY;
+                        const newOffset = {
+                          x: startOffset.x + deltaX,
+                          y: startOffset.y + deltaY,
+                        };
+                        setCameraOverlay(prev => ({ ...prev, screenOffset: newOffset }));
+                      };
+                      
+                      const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                      };
+                      
+                      document.body.style.cursor = 'grabbing';
+                      document.body.style.userSelect = 'none';
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                    };
+
+                    // 调整大小处理 - 摄像头
+                    const handleCameraResizeStart = (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startY = e.clientY;
+                      const startScale = cameraScale;
+                      
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        const deltaY = (moveEvent.clientY - startY) / 200;
+                        const newScale = Math.max(0.3, Math.min(1.5, startScale + deltaY));
+                        setCameraOverlay(prev => ({ ...prev, cameraScale: newScale }));
+                      };
+                      
+                      const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                      };
+                      
+                      document.body.style.cursor = 'nwse-resize';
+                      document.body.style.userSelect = 'none';
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                    };
+
+                    // 调整大小处理 - 录屏
+                    const handleScreenResizeStart = (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startY = e.clientY;
+                      const startScale = screenScale;
+                      
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        const deltaY = (moveEvent.clientY - startY) / 200;
+                        const newScale = Math.max(0.3, Math.min(1.5, startScale + deltaY));
+                        setCameraOverlay(prev => ({ ...prev, screenScale: newScale }));
+                      };
+                      
+                      const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                      };
+                      
+                      document.body.style.cursor = 'nwse-resize';
+                      document.body.style.userSelect = 'none';
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                    };
+
+                    // 调整大小手柄组件（隐藏图标，只保留点击区域）
+                    const ResizeHandle = ({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) => (
+                      <div
+                        onMouseDown={onMouseDown}
+                        style={{
+                          position: 'absolute',
+                          right: 0,
+                          bottom: 0,
+                          width: '24px',
+                          height: '24px',
+                          cursor: 'nwse-resize',
+                          zIndex: 10,
+                        }}
                       />
-                    )}
-                    <VideoPlayback
-                      aspectRatio={aspectRatio}
-                      ref={videoPlaybackRef}
-                      videoPath={videoPath || ''}
-                      onDurationChange={(dur) => {
-                        setDuration(dur);
-                        // Apply pending region crop if exists
-                        const pendingRegion = (window as any).__pendingRegionCrop;
-                        if (pendingRegion && videoPlaybackRef.current?.video) {
-                          const video = videoPlaybackRef.current.video;
-                          const videoWidth = video.videoWidth;
-                          const videoHeight = video.videoHeight;
+                    );
+
+                    if (isSplitMode) {
+                      // 分屏布局：间隔 1px，所有尺寸用像素值计算，最大化显示
+                      const gapPx = 1;
+                      const containerW = splitContainerSize.width || 800;
+                      const containerH = splitContainerSize.height || 450;
+                      
+                      // 左右分屏：摄像头 9:16，录屏 16:9，两者高度一致
+                      // 宽度比例：摄像头 9/16，录屏 16/9
+                      // 总宽度比例 = 9/16 + 16/9 = (81 + 256) / 144 = 337/144 ≈ 2.34
+                      const cameraRatio = 9 / 16; // 宽/高
+                      const screenRatio = 16 / 9; // 宽/高
+                      const totalWidthRatio = cameraRatio + screenRatio; // 约 2.34
+                      
+                      // 可用空间
+                      const availableWidth = containerW - gapPx;
+                      const availableHeight = containerH;
+                      
+                      // 方案1：用满高度，计算所需宽度
+                      const heightBasedWidth = availableHeight * totalWidthRatio;
+                      
+                      // 方案2：用满宽度，计算所需高度
+                      const widthBasedHeight = availableWidth / totalWidthRatio;
+                      
+                      // 选择最大化方案：取能完全容纳的最大尺寸
+                      let finalHeightPx: number;
+                      if (heightBasedWidth <= availableWidth) {
+                        // 高度受限，用满高度
+                        finalHeightPx = availableHeight;
+                      } else {
+                        // 宽度受限，用满宽度
+                        finalHeightPx = widthBasedHeight;
+                      }
+                      
+                      // 放大 20%
+                      finalHeightPx = finalHeightPx * 1.32;
+                      
+                      // 计算最终宽度（像素）
+                      const cameraWidthPx = Math.floor(finalHeightPx * cameraRatio);
+                      const screenWidthPx = Math.floor(finalHeightPx * screenRatio);
+                      finalHeightPx = Math.floor(finalHeightPx);
+                      
+                      // 摄像头组件 JSX
+                      const cameraElement = (
+                        <div 
+                          style={{
+                            position: 'relative',
+                            width: cameraWidthPx,
+                            height: finalHeightPx,
+                            flexShrink: 0,
+                            transform: `scale(${cameraScale}) translate(${cameraOffset.x}px, ${cameraOffset.y}px)`,
+                            transformOrigin: 'center center',
+                          }}
+                        >
+                          <div 
+                            style={{ width: '100%', height: '100%', cursor: 'grab' }}
+                            onMouseDown={handleCameraDragStart}
+                          >
+                            <video
+                              src={`file://${cameraOverlay.videoPath}`}
+                              style={getCameraVideoStyle()}
+                              muted
+                              playsInline
+                              ref={(el) => {
+                                if (el) {
+                                  const targetTime = currentTime;
+                                  if (Math.abs(el.currentTime - targetTime) > 0.1) {
+                                    el.currentTime = targetTime;
+                                  }
+                                  if (isPlaying && el.paused) {
+                                    el.play().catch(() => {});
+                                  } else if (!isPlaying && !el.paused) {
+                                    el.pause();
+                                  }
+                                }
+                              }}
+                            />
+                          </div>
+                          <ResizeHandle onMouseDown={handleCameraResizeStart} />
+                        </div>
+                      );
+                      
+                      // 录屏组件 JSX - 高度与摄像头完全一致（像素值）
+                      const screenElement = (
+                        <div 
+                          style={{
+                            position: 'relative',
+                            width: screenWidthPx,
+                            height: finalHeightPx,
+                            flexShrink: 0,
+                            transform: `scale(${screenScale}) translate(${screenOffset.x}px, ${screenOffset.y}px)`,
+                            transformOrigin: 'center center',
+                          }}
+                        >
+                          <div
+                            onMouseDown={handleScreenDragStart}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              cursor: 'grab',
+                            }}
+                          >
+                            <VideoPlayback
+                              aspectRatio={aspectRatio}
+                              ref={videoPlaybackRef}
+                              videoPath={videoPath || ''}
+                              hideBackground={true}
+                              onDurationChange={(dur) => {
+                                setDuration(dur);
+                                const pendingRegion = (window as any).__pendingRegionCrop;
+                                if (pendingRegion && videoPlaybackRef.current?.video) {
+                                  const video = videoPlaybackRef.current.video;
+                                  const videoWidth = video.videoWidth;
+                                  const videoHeight = video.videoHeight;
+                                  if (videoWidth > 0 && videoHeight > 0) {
+                                    const cropX = pendingRegion.x / videoWidth;
+                                    const cropY = pendingRegion.y / videoHeight;
+                                    const cropWidth = pendingRegion.width / videoWidth;
+                                    const cropHeight = pendingRegion.height / videoHeight;
+                                    const normalizedCrop = {
+                                      x: Math.max(0, Math.min(1, cropX)),
+                                      y: Math.max(0, Math.min(1, cropY)),
+                                      width: Math.max(0.1, Math.min(1 - Math.max(0, cropX), cropWidth)),
+                                      height: Math.max(0.1, Math.min(1 - Math.max(0, cropHeight), cropHeight)),
+                                    };
+                                    setCropRegion(normalizedCrop);
+                                    delete (window as any).__pendingRegionCrop;
+                                  }
+                                }
+                              }}
+                              onTimeUpdate={setCurrentTime}
+                              currentTime={currentTime}
+                              onPlayStateChange={setIsPlaying}
+                              onError={setError}
+                              wallpaper={wallpaper}
+                              zoomRegions={zoomRegions}
+                              selectedZoomId={selectedZoomId}
+                              onSelectZoom={handleSelectZoom}
+                              onZoomFocusChange={handleZoomFocusChange}
+                              isPlaying={isPlaying}
+                              showShadow={shadowIntensity > 0}
+                              shadowIntensity={shadowIntensity}
+                              showBlur={false}
+                              motionBlurEnabled={motionBlurEnabled}
+                              borderRadius={borderRadius}
+                              padding={padding}
+                              cropRegion={cropRegion}
+                              trimRegions={trimRegions}
+                              annotationRegions={annotationRegions}
+                              selectedAnnotationId={selectedAnnotationId}
+                              onSelectAnnotation={handleSelectAnnotation}
+                              onAnnotationPositionChange={handleAnnotationPositionChange}
+                              onAnnotationSizeChange={handleAnnotationSizeChange}
+                            />
+                          </div>
+                          <ResizeHandle onMouseDown={handleScreenResizeStart} />
+                        </div>
+                      );
+                      
+                      // 分屏布局：间隔 1px，所有宽高用像素值计算，居中最大化显示
+                      return (
+                        <div 
+                          ref={splitContainerRef}
+                          className="relative rounded-sm overflow-hidden"
+                          style={{ 
+                            width: '100%', 
+                            height: '100%',
+                          }}
+                        >
+                          {/* 背景层 */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              ...getBackgroundStyle(),
+                              filter: showBlur ? 'blur(2px)' : 'none',
+                            }}
+                          />
                           
-                          if (videoWidth > 0 && videoHeight > 0) {
-                            // Convert pixel region to normalized crop region (0-1)
-                            const cropX = pendingRegion.x / videoWidth;
-                            const cropY = pendingRegion.y / videoHeight;
-                            const cropWidth = pendingRegion.width / videoWidth;
-                            const cropHeight = pendingRegion.height / videoHeight;
-                            
-                            // Clamp values to valid range
-                            const normalizedCrop = {
-                              x: Math.max(0, Math.min(1, cropX)),
-                              y: Math.max(0, Math.min(1, cropY)),
-                              width: Math.max(0.1, Math.min(1 - Math.max(0, cropX), cropWidth)),
-                              height: Math.max(0.1, Math.min(1 - Math.max(0, cropY), cropHeight)),
-                            };
-                            
-                            console.log('Applying region crop:', normalizedCrop, 'from', pendingRegion, 'video:', videoWidth, 'x', videoHeight);
-                            setCropRegion(normalizedCrop);
-                            delete (window as any).__pendingRegionCrop;
-                          }
-                        }
-                      }}
-                      onTimeUpdate={setCurrentTime}
-                      currentTime={currentTime}
-                      onPlayStateChange={setIsPlaying}
-                      onError={setError}
-                      wallpaper={wallpaper}
-                      zoomRegions={zoomRegions}
-                      selectedZoomId={selectedZoomId}
-                      onSelectZoom={handleSelectZoom}
-                      onZoomFocusChange={handleZoomFocusChange}
-                      isPlaying={isPlaying}
-                      showShadow={shadowIntensity > 0}
-                      shadowIntensity={shadowIntensity}
-                      showBlur={showBlur}
-                      motionBlurEnabled={motionBlurEnabled}
-                      borderRadius={borderRadius}
-                      padding={padding}
-                      cropRegion={cropRegion}
-                      trimRegions={trimRegions}
-                      annotationRegions={annotationRegions}
-                      selectedAnnotationId={selectedAnnotationId}
-                      onSelectAnnotation={handleSelectAnnotation}
-                      onAnnotationPositionChange={handleAnnotationPositionChange}
-                      onAnnotationSizeChange={handleAnnotationSizeChange}
-                    />
-                  </div>
+                          {/* 分屏内容容器 - 间隔 1px，高度一致（像素值），居中最大化 */}
+                          <div 
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              zIndex: 1,
+                              display: 'flex',
+                              flexDirection: isHorizontal ? 'row' : 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: gapPx, // 间隔 1px
+                              boxSizing: 'border-box',
+                            }}
+                          >
+                            {/* 根据 cameraFirst 决定顺序 */}
+                            {cameraFirst ? (
+                              <>
+                                {cameraElement}
+                                {screenElement}
+                              </>
+                            ) : (
+                              <>
+                                {screenElement}
+                                {cameraElement}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // 画中画模式
+                    return (
+                      <div className="relative" style={{ width: 'auto', height: '100%', aspectRatio: getAspectRatioValue(aspectRatio), maxWidth: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+                        {/* Camera overlay (picture-in-picture) */}
+                        {cameraOverlay.enabled && cameraOverlay.videoPath && videoPlaybackRef.current?.containerRef?.current && (
+                          <PictureInPicture
+                            overlay={cameraOverlay}
+                            onOverlayChange={handleCameraOverlayChange}
+                            containerWidth={videoPlaybackRef.current.containerRef.current.clientWidth}
+                            containerHeight={videoPlaybackRef.current.containerRef.current.clientHeight}
+                            currentTimeMs={Math.round(currentTime * 1000)}
+                            isPlaying={isPlaying}
+                            videoDurationMs={Math.round(duration * 1000)}
+                          />
+                        )}
+                        <VideoPlayback
+                          aspectRatio={aspectRatio}
+                          ref={videoPlaybackRef}
+                          videoPath={videoPath || ''}
+                          onDurationChange={(dur) => {
+                            setDuration(dur);
+                            const pendingRegion = (window as any).__pendingRegionCrop;
+                            if (pendingRegion && videoPlaybackRef.current?.video) {
+                              const video = videoPlaybackRef.current.video;
+                              const videoWidth = video.videoWidth;
+                              const videoHeight = video.videoHeight;
+                              if (videoWidth > 0 && videoHeight > 0) {
+                                const cropX = pendingRegion.x / videoWidth;
+                                const cropY = pendingRegion.y / videoHeight;
+                                const cropWidth = pendingRegion.width / videoWidth;
+                                const cropHeight = pendingRegion.height / videoHeight;
+                                const normalizedCrop = {
+                                  x: Math.max(0, Math.min(1, cropX)),
+                                  y: Math.max(0, Math.min(1, cropY)),
+                                  width: Math.max(0.1, Math.min(1 - Math.max(0, cropX), cropWidth)),
+                                  height: Math.max(0.1, Math.min(1 - Math.max(0, cropY), cropHeight)),
+                                };
+                                setCropRegion(normalizedCrop);
+                                delete (window as any).__pendingRegionCrop;
+                              }
+                            }
+                          }}
+                          onTimeUpdate={setCurrentTime}
+                          currentTime={currentTime}
+                          onPlayStateChange={setIsPlaying}
+                          onError={setError}
+                          wallpaper={wallpaper}
+                          zoomRegions={zoomRegions}
+                          selectedZoomId={selectedZoomId}
+                          onSelectZoom={handleSelectZoom}
+                          onZoomFocusChange={handleZoomFocusChange}
+                          isPlaying={isPlaying}
+                          showShadow={shadowIntensity > 0}
+                          shadowIntensity={shadowIntensity}
+                          showBlur={showBlur}
+                          motionBlurEnabled={motionBlurEnabled}
+                          borderRadius={borderRadius}
+                          padding={padding}
+                          cropRegion={cropRegion}
+                          trimRegions={trimRegions}
+                          annotationRegions={annotationRegions}
+                          selectedAnnotationId={selectedAnnotationId}
+                          onSelectAnnotation={handleSelectAnnotation}
+                          onAnnotationPositionChange={handleAnnotationPositionChange}
+                          onAnnotationSizeChange={handleAnnotationSizeChange}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
                 {/* Playback controls */}
                 <div className="w-full flex justify-center items-center" style={{ height: '48px', flexShrink: 0, padding: '6px 12px', margin: '6px 0 6px 0' }}>

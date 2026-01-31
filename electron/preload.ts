@@ -1,6 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
+    // Window control APIs
+    windowMinimize: () => {
+      ipcRenderer.send('window-minimize');
+    },
+    windowMaximize: () => {
+      ipcRenderer.send('window-maximize');
+    },
+    windowClose: () => {
+      ipcRenderer.send('window-close');
+    },
+    
     hudOverlayHide: () => {
       ipcRenderer.send('hud-overlay-hide');
     },
@@ -215,6 +226,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   removeRegionIndicatorListener: () => {
     ipcRenderer.removeAllListeners('region-indicator-update')
+  },
+
+  // Teleprompter Window APIs
+  showTeleprompter: () => {
+    return ipcRenderer.invoke('show-teleprompter')
+  },
+  hideTeleprompter: () => {
+    return ipcRenderer.invoke('hide-teleprompter')
+  },
+  closeTeleprompter: () => {
+    return ipcRenderer.invoke('close-teleprompter')
+  },
+  isTeleprompterVisible: () => {
+    return ipcRenderer.invoke('is-teleprompter-visible')
+  },
+  updateTeleprompterContent: (content: string) => {
+    return ipcRenderer.invoke('update-teleprompter-content', content)
+  },
+  onTeleprompterContentUpdate: (callback: (content: string) => void) => {
+    const listener = (_: any, content: string) => callback(content)
+    ipcRenderer.on('teleprompter-content-update', listener)
+    return () => ipcRenderer.removeListener('teleprompter-content-update', listener)
+  },
+  teleprompterResizeStart: () => {
+    return ipcRenderer.invoke('teleprompter-resize-start')
+  },
+  teleprompterResizeMove: (data: { direction: string; deltaX: number; deltaY: number }) => {
+    return ipcRenderer.invoke('teleprompter-resize-move', data)
+  },
+  teleprompterResizeEnd: () => {
+    return ipcRenderer.invoke('teleprompter-resize-end')
   },
 
   // Pro Feature APIs - Keyframes and Flow Graph

@@ -41,6 +41,8 @@ interface VideoPlaybackProps {
   onSelectAnnotation?: (id: string | null) => void;
   onAnnotationPositionChange?: (id: string, position: { x: number; y: number }) => void;
   onAnnotationSizeChange?: (id: string, size: { width: number; height: number }) => void;
+  /** Hide background (for split layout mode where background is provided by parent) */
+  hideBackground?: boolean;
 }
 
 export interface VideoPlaybackRef {
@@ -80,6 +82,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   onSelectAnnotation,
   onAnnotationPositionChange,
   onAnnotationSizeChange,
+  hideBackground = false,
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -790,14 +793,16 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
 
   return (
     <div className="relative rounded-sm overflow-hidden" style={{ width: '100%', aspectRatio: formatAspectRatioForCSS(aspectRatio) }}>
-      {/* Background layer - always render as DOM element with blur */}
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{
-          ...backgroundStyle,
-          filter: showBlur ? 'blur(2px)' : 'none',
-        }}
-      />
+      {/* Background layer - only render if not hidden (for split layout) */}
+      {!hideBackground && (
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            ...backgroundStyle,
+            filter: showBlur ? 'blur(2px)' : 'none',
+          }}
+        />
+      )}
       <div
         ref={containerRef}
         className="absolute inset-0"

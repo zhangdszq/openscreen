@@ -17,6 +17,33 @@ let regionIndicatorWindow: BrowserWindow | null = null;
 let regionSelectionResolve: ((region: { x: number; y: number; width: number; height: number } | null) => void) | null = null;
 let windowPickerWindow: BrowserWindow | null = null;
 let windowPickerResolve: ((result: any) => void) | null = null;
+let teleprompterWindow: BrowserWindow | null = null;
+
+// Generic window control IPC handlers
+ipcMain.on('window-minimize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    win.minimize();
+  }
+});
+
+ipcMain.on('window-maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  }
+});
+
+ipcMain.on('window-close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    win.close();
+  }
+});
 
 ipcMain.on('hud-overlay-hide', () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
@@ -27,6 +54,150 @@ ipcMain.on('hud-overlay-hide', () => {
     cameraPreviewWindow.hide();
   }
 });
+
+// ============================================================================
+// Teleprompter Window IPC handlers
+// ============================================================================
+
+ipcMain.handle('show-teleprompter', () => {
+  if (!teleprompterWindow || teleprompterWindow.isDestroyed()) {
+    teleprompterWindow = createTeleprompterWindow();
+  } else {
+    teleprompterWindow.show();
+  }
+  return { success: true };
+});
+
+ipcMain.handle('hide-teleprompter', () => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.hide();
+  }
+  return { success: true };
+});
+
+ipcMain.handle('close-teleprompter', () => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.close();
+    teleprompterWindow = null;
+  }
+  return { success: true };
+});
+
+ipcMain.handle('is-teleprompter-visible', () => {
+  return teleprompterWindow && !teleprompterWindow.isDestroyed() && teleprompterWindow.isVisible();
+});
+
+ipcMain.handle('update-teleprompter-content', (_, content: string) => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.webContents.send('teleprompter-content-update', content);
+  }
+  return { success: true };
+});
+
+// 存储 resize 开始时的边界
+let teleprompterResizeStart: { x: number; y: number; width: number; height: number } | null = null;
+
+ipcMain.handle('teleprompter-resize-start', () => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterResizeStart = teleprompterWindow.getBounds();
+  }
+  return { success: true };
+});
+
+ipcMain.handle('teleprompter-resize-move', (_, data: { 
+  direction: string;
+  deltaX: number;
+  deltaY: number;
+}) => {
+  if (!teleprompterWindow || teleprompterWindow.isDestroyed() || !teleprompterResizeStart) {
+    return { success: false };
+  }
+  
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { workArea } = primaryDisplay;
+  const start = teleprompterResizeStart;
+  const dir = data.direction;
+  
+  let newX = start.x;
+  let newY = start.y;
+  let newWidth = start.width;
+  let newHeight = start.height;
+  
+  // 根据方向计算新尺寸和位置
+  // 东 (右)
+  if (dir === 'e' || dir === 'se' || dir === 'ne') {
+    newWidth = start.width + data.deltaX;
+  }
+  // 西 (左)
+  if (dir === 'w' || dir === 'sw' || dir === 'nw') {
+    newWidth = start.width - data.deltaX;
+    newX = start.x + data.deltaX;
+  }
+  // 南 (下)
+  if (dir === 's' || dir === 'se' || dir === 'sw') {
+    newHeight = start.height + data.deltaY;
+  }
+  // 北 (上)
+  if (dir === 'n' || dir === 'ne' || dir === 'nw') {
+    newHeight = start.height - data.deltaY;
+    newY = start.y + data.deltaY;
+  }
+  
+  // 限制最小尺寸
+  const minWidth = 280;
+  const minHeight = 200;
+  
+  if (newWidth < minWidth) {
+    if (dir === 'w' || dir === 'sw' || dir === 'nw') {
+      newX = start.x + start.width - minWidth;
+    }
+    newWidth = minWidth;
+  }
+  if (newHeight < minHeight) {
+    if (dir === 'n' || dir === 'ne' || dir === 'nw') {
+      newY = start.y + start.height - minHeight;
+    }
+    newHeight = minHeight;
+  }
+  
+  // 限制不能超出屏幕
+  if (newX < workArea.x) {
+    newWidth = newWidth - (workArea.x - newX);
+    newX = workArea.x;
+  }
+  if (newY < workArea.y) {
+    newHeight = newHeight - (workArea.y - newY);
+    newY = workArea.y;
+  }
+  if (newX + newWidth > workArea.x + workArea.width) {
+    newWidth = workArea.x + workArea.width - newX;
+  }
+  if (newY + newHeight > workArea.y + workArea.height) {
+    newHeight = workArea.y + workArea.height - newY;
+  }
+  
+  teleprompterWindow.setBounds({
+    x: Math.round(newX),
+    y: Math.round(newY),
+    width: Math.round(newWidth),
+    height: Math.round(newHeight),
+  });
+  
+  return { success: true };
+});
+
+ipcMain.handle('teleprompter-resize-end', () => {
+  teleprompterResizeStart = null;
+  return { success: true };
+});
+
+// Export function to close teleprompter window
+export function closeTeleprompterWindow() {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.close();
+    teleprompterWindow = null;
+  }
+}
 
 // Camera Preview Window IPC handlers
 ipcMain.handle('show-camera-preview', (_, options: { 
@@ -547,8 +718,9 @@ export function createEditorWindow(): BrowserWindow {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    frame: false, // 无边框窗口，使用自定义标题栏
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     ...(isMac && {
-      titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 12, y: 12 },
     }),
     transparent: false,
@@ -1152,5 +1324,72 @@ export function createCameraPreviewWindow(options: {
     }
   });
 
+  return win;
+}
+
+// ============================================================================
+// Teleprompter Window
+// ============================================================================
+
+export function createTeleprompterWindow(): BrowserWindow {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { workArea } = primaryDisplay;
+  
+  // 窗口尺寸 - 默认更大一些
+  const windowWidth = 400;
+  const windowHeight = 500;
+  
+  // 默认位置：右上角
+  const padding = 20;
+  const x = workArea.x + workArea.width - windowWidth - padding;
+  const y = workArea.y + padding;
+  
+  const isMac = process.platform === 'darwin';
+  
+  const win = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    resizable: false, // 禁用系统 resize，使用自定义 resize handles
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    minWidth: 300,
+    minHeight: 300,
+    maxWidth: 600,
+    maxHeight: 800,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      backgroundThrottling: false,
+    },
+  });
+  
+  // Set to stay on top but below region indicator
+  win.setAlwaysOnTop(true, isMac ? 'floating' : 'screen-saver', 0);
+  
+  // Prevent window from being captured during screen recording
+  win.setContentProtection(true);
+  
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=teleprompter');
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), {
+      query: { windowType: 'teleprompter' }
+    });
+  }
+  
+  teleprompterWindow = win;
+  
+  win.on('closed', () => {
+    if (teleprompterWindow === win) {
+      teleprompterWindow = null;
+    }
+  });
+  
   return win;
 }

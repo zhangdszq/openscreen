@@ -4,8 +4,9 @@ import { useScreenRecorder } from "../../hooks/useScreenRecorder";
 import { BsRecordCircle } from "react-icons/bs";
 import { FaRegStopCircle } from "react-icons/fa";
 import { MdMonitor, MdCropFree, MdWindow } from "react-icons/md";
-import { FiMinus, FiX, FiFolder, FiChevronDown, FiMonitor, FiMic, FiVolume2, FiFileText } from "react-icons/fi";
+import { FiMinus, FiX, FiFolder, FiChevronDown, FiMonitor, FiMic, FiVolume2, FiSettings, FiFileText } from "react-icons/fi";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { AISettingsDialog } from "./AISettingsDialog";
 
 type RecordingMode = 'fullscreen' | 'region' | 'window';
 
@@ -219,6 +220,13 @@ export function LaunchWindow() {
             </button>
           </div>
           <div className={`flex items-center gap-1 ${styles.electronNoDrag}`}>
+            <AISettingsDialog 
+              trigger={
+                <button className="w-8 h-8 flex items-center justify-center hover:bg-white/8 rounded-lg transition-all duration-200 group">
+                  <FiSettings size={15} className="text-white/40 group-hover:text-white/80" />
+                </button>
+              }
+            />
             <button onClick={() => window.electronAPI?.hudOverlayHide?.()} className="w-8 h-8 flex items-center justify-center hover:bg-white/8 rounded-lg transition-all duration-200 group">
               <FiMinus size={15} className="text-white/40 group-hover:text-white/80" />
             </button>
@@ -478,7 +486,10 @@ export function LaunchWindow() {
 
               {/* Teleprompter Button */}
               <div className="mt-auto pt-3 border-t border-white/[0.06]">
-                <button className={`w-full h-10 rounded-xl flex items-center justify-center gap-2 text-[12px] text-white/50 hover:text-white/70 transition-all duration-200 group ${styles.glassCard}`}>
+                <button 
+                  onClick={() => window.electronAPI?.showTeleprompter?.()}
+                  className={`w-full h-10 rounded-xl flex items-center justify-center gap-2 text-[12px] text-white/50 hover:text-white/70 transition-all duration-200 group ${styles.glassCard}`}
+                >
                   <FiFileText size={14} className="text-white/35 group-hover:text-white/55" />
                   提词器
                 </button>

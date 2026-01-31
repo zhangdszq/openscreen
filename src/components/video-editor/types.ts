@@ -343,7 +343,77 @@ export function createEmptyFlowGraph(name: string = '未命名流程图'): FlowG
 // ============================================================================
 
 export type CameraOverlayShape = 'circle' | 'rectangle';
-export type CameraOverlayPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'custom';
+export type CameraOverlayPosition = 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right' | 'custom';
+export type CameraBackgroundMode = 'original' | 'remove' | 'blur' | 'custom';
+
+/**
+ * Layout mode for camera and screen arrangement
+ * - pip-*: Picture-in-picture mode (camera as small overlay)
+ * - split-*: Split screen mode (camera and screen side by side)
+ */
+export type CameraLayoutMode = 
+  | 'pip-top-left' 
+  | 'pip-top-center' 
+  | 'pip-top-right' 
+  | 'pip-bottom-left' 
+  | 'pip-bottom-center' 
+  | 'pip-bottom-right'
+  | 'split-left'      // Camera on left, screen on right
+  | 'split-right'     // Screen on left, camera on right
+  | 'split-top'       // Camera on top, screen on bottom
+  | 'split-bottom';   // Screen on top, camera on bottom
+
+/**
+ * Layout configuration for each mode
+ */
+export interface CameraLayoutConfig {
+  mode: CameraLayoutMode;
+  label: string;
+  /** For PiP modes: position of camera overlay */
+  pipPosition?: { x: number; y: number };
+  /** For split modes: ratio of camera area (0-1) */
+  splitRatio?: number;
+  /** Whether this is a split mode */
+  isSplit: boolean;
+}
+
+/**
+ * All available layout configurations
+ */
+export const CAMERA_LAYOUT_CONFIGS: CameraLayoutConfig[] = [
+  // PiP modes (first row in UI)
+  { mode: 'pip-top-left', label: '左上', pipPosition: { x: 0.08, y: 0.12 }, isSplit: false },
+  { mode: 'pip-top-center', label: '上中', pipPosition: { x: 0.5, y: 0.12 }, isSplit: false },
+  { mode: 'pip-top-right', label: '右上', pipPosition: { x: 0.92, y: 0.12 }, isSplit: false },
+  // PiP modes (second row in UI)
+  { mode: 'pip-bottom-left', label: '左下', pipPosition: { x: 0.08, y: 0.88 }, isSplit: false },
+  { mode: 'pip-bottom-center', label: '下中', pipPosition: { x: 0.5, y: 0.88 }, isSplit: false },
+  { mode: 'pip-bottom-right', label: '右下', pipPosition: { x: 0.92, y: 0.88 }, isSplit: false },
+  // Split modes
+  { mode: 'split-left', label: '左分屏', splitRatio: 0.3, isSplit: true },
+  { mode: 'split-right', label: '右分屏', splitRatio: 0.3, isSplit: true },
+  { mode: 'split-top', label: '上分屏', splitRatio: 0.25, isSplit: true },
+  { mode: 'split-bottom', label: '下分屏', splitRatio: 0.25, isSplit: true },
+];
+
+/**
+ * Get layout config by mode
+ */
+export function getLayoutConfig(mode: CameraLayoutMode): CameraLayoutConfig {
+  return CAMERA_LAYOUT_CONFIGS.find(c => c.mode === mode) || CAMERA_LAYOUT_CONFIGS[5]; // default to pip-bottom-right
+}
+
+/**
+ * Preset position configurations for camera overlay (legacy, for backward compatibility)
+ */
+export const CAMERA_POSITION_PRESETS: Record<Exclude<CameraOverlayPosition, 'custom'>, { x: number; y: number }> = {
+  'top-left': { x: 0.08, y: 0.12 },
+  'top-center': { x: 0.5, y: 0.12 },
+  'top-right': { x: 0.92, y: 0.12 },
+  'bottom-left': { x: 0.08, y: 0.88 },
+  'bottom-center': { x: 0.5, y: 0.88 },
+  'bottom-right': { x: 0.92, y: 0.88 },
+};
 
 /**
  * Camera overlay settings for picture-in-picture effect
@@ -355,14 +425,36 @@ export interface CameraOverlay {
   videoPath: string;
   /** Position (normalized 0-1, relative to video dimensions) */
   position: { x: number; y: number };
-  /** Size as percentage of video width (5-50%) */
+  /** Preset position name (legacy) */
+  positionPreset: CameraOverlayPosition;
+  /** Layout mode - controls how camera and screen are arranged */
+  layoutMode: CameraLayoutMode;
+  /** Size as percentage of video width (5-50%) for PiP modes */
   size: number;
+  /** Split ratio (0-1) for split modes */
+  splitRatio: number;
+  /** Camera scale (0.3-1) for split modes - independent camera size */
+  cameraScale: number;
+  /** Screen scale (0.3-1) for split modes - independent screen recording size */
+  screenScale: number;
+  /** Camera offset in split modes (normalized -1 to 1, 0 = center) */
+  cameraOffset: { x: number; y: number };
+  /** Screen offset in split modes (normalized -1 to 1, 0 = center) */
+  screenOffset: { x: number; y: number };
   /** Shape of the camera overlay */
   shape: CameraOverlayShape;
   /** Opacity (0-1) */
   opacity: number;
   /** Border style */
   borderStyle: 'none' | 'white' | 'shadow';
+  /** Border radius in pixels (for rectangle shape) */
+  borderRadius: number;
+  /** Whether to mirror/flip horizontally */
+  mirror: boolean;
+  /** Background removal mode */
+  backgroundMode: CameraBackgroundMode;
+  /** Custom background color (when backgroundMode is 'custom') */
+  customBackgroundColor?: string;
 }
 
 /**
@@ -371,9 +463,19 @@ export interface CameraOverlay {
 export const DEFAULT_CAMERA_OVERLAY: CameraOverlay = {
   enabled: false,
   videoPath: '',
-  position: { x: 0.95, y: 0.95 }, // Bottom-right by default
+  position: { x: 0.92, y: 0.88 }, // Bottom-right by default
+  positionPreset: 'bottom-right',
+  layoutMode: 'pip-bottom-right',
   size: 15, // 15% of video width
+  splitRatio: 0.3, // 30% for split modes
+  cameraScale: 0.9, // 90% camera size in split modes
+  screenScale: 0.9, // 90% screen size in split modes
+  cameraOffset: { x: 0, y: 0 }, // center by default
+  screenOffset: { x: 0, y: 0 }, // center by default
   shape: 'circle',
   opacity: 1,
   borderStyle: 'shadow',
+  borderRadius: 8,
+  mirror: false,
+  backgroundMode: 'original',
 };

@@ -5,6 +5,7 @@ import { CameraPreviewWindow } from "./components/launch/CameraPreviewWindow";
 import { RegionSelector } from "./components/launch/RegionSelector";
 import RegionIndicator from "./components/launch/RegionIndicator";
 import { WindowPicker } from "./components/launch/WindowPicker";
+import { TeleprompterWindow } from "./components/launch/TeleprompterWindow";
 import VideoEditor from "./components/video-editor/VideoEditor";
 
 export default function App() {
@@ -14,7 +15,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const type = params.get('windowType') || '';
     setWindowType(type);
-    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview' || type === 'region-selector' || type === 'region-indicator' || type === 'window-picker') {
+    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview' || type === 'region-selector' || type === 'region-indicator' || type === 'window-picker' || type === 'teleprompter') {
       document.body.style.background = 'transparent';
       document.documentElement.style.background = 'transparent';
       document.getElementById('root')?.style.setProperty('background', 'transparent');
@@ -39,9 +40,11 @@ export default function App() {
       return <RegionIndicator isRecording={true} />;
     case 'window-picker':
       return <WindowPicker />;
+    case 'teleprompter':
+      return <TeleprompterWindow />;
     case 'editor':
       return <VideoEditor />;
-      default:
+    default:
       return (
         <div className="w-full h-full bg-background text-foreground">
           <h1>Openscreen</h1>

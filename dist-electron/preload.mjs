@@ -1,6 +1,16 @@
 "use strict";
 const electron = require("electron");
 electron.contextBridge.exposeInMainWorld("electronAPI", {
+  // Window control APIs
+  windowMinimize: () => {
+    electron.ipcRenderer.send("window-minimize");
+  },
+  windowMaximize: () => {
+    electron.ipcRenderer.send("window-maximize");
+  },
+  windowClose: () => {
+    electron.ipcRenderer.send("window-close");
+  },
   hudOverlayHide: () => {
     electron.ipcRenderer.send("hud-overlay-hide");
   },
@@ -198,6 +208,36 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   removeRegionIndicatorListener: () => {
     electron.ipcRenderer.removeAllListeners("region-indicator-update");
+  },
+  // Teleprompter Window APIs
+  showTeleprompter: () => {
+    return electron.ipcRenderer.invoke("show-teleprompter");
+  },
+  hideTeleprompter: () => {
+    return electron.ipcRenderer.invoke("hide-teleprompter");
+  },
+  closeTeleprompter: () => {
+    return electron.ipcRenderer.invoke("close-teleprompter");
+  },
+  isTeleprompterVisible: () => {
+    return electron.ipcRenderer.invoke("is-teleprompter-visible");
+  },
+  updateTeleprompterContent: (content) => {
+    return electron.ipcRenderer.invoke("update-teleprompter-content", content);
+  },
+  onTeleprompterContentUpdate: (callback) => {
+    const listener = (_, content) => callback(content);
+    electron.ipcRenderer.on("teleprompter-content-update", listener);
+    return () => electron.ipcRenderer.removeListener("teleprompter-content-update", listener);
+  },
+  teleprompterResizeStart: () => {
+    return electron.ipcRenderer.invoke("teleprompter-resize-start");
+  },
+  teleprompterResizeMove: (data) => {
+    return electron.ipcRenderer.invoke("teleprompter-resize-move", data);
+  },
+  teleprompterResizeEnd: () => {
+    return electron.ipcRenderer.invoke("teleprompter-resize-end");
   },
   // Pro Feature APIs - Keyframes and Flow Graph
   saveKeyframeImage: (imageData, fileName) => {

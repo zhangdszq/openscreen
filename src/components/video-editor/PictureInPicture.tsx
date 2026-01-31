@@ -111,6 +111,7 @@ export function PictureInPicture({
             x: clampedX / containerWidth,
             y: clampedY / containerHeight,
           },
+          positionPreset: 'custom', // Mark as custom position when dragged
         });
       } else if (isResizing) {
         const deltaX = e.clientX - dragStart.x;
@@ -151,7 +152,7 @@ export function PictureInPicture({
   }
 
   const isCircle = overlay.shape === 'circle';
-  const borderRadius = isCircle ? '50%' : '12px';
+  const borderRadius = isCircle ? '50%' : `${overlay.borderRadius || 12}px`;
 
   // Shadow/border styles
   const getBorderStyle = () => {
@@ -208,7 +209,7 @@ export function PictureInPicture({
           width: '100%',
           height: '100%',
           objectFit: 'cover',
-          transform: 'scaleX(-1)', // Mirror the camera
+          transform: overlay.mirror ? 'scaleX(-1)' : 'none', // Mirror based on settings
         }}
       />
       

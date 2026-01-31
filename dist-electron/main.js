@@ -1,4 +1,4 @@
-import { ipcMain, screen, BrowserWindow, systemPreferences, dialog, desktopCapturer, shell, app, nativeImage, Tray, Menu } from "electron";
+import { ipcMain, BrowserWindow, screen, systemPreferences, dialog, desktopCapturer, shell, app, nativeImage, Tray, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -218,6 +218,29 @@ let regionIndicatorWindow = null;
 let regionSelectionResolve = null;
 let windowPickerWindow = null;
 let windowPickerResolve = null;
+let teleprompterWindow = null;
+ipcMain.on("window-minimize", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    win.minimize();
+  }
+});
+ipcMain.on("window-maximize", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  }
+});
+ipcMain.on("window-close", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    win.close();
+  }
+});
 ipcMain.on("hud-overlay-hide", () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
     hudOverlayWindow.minimize();
@@ -225,6 +248,109 @@ ipcMain.on("hud-overlay-hide", () => {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
     cameraPreviewWindow.hide();
   }
+});
+ipcMain.handle("show-teleprompter", () => {
+  if (!teleprompterWindow || teleprompterWindow.isDestroyed()) {
+    teleprompterWindow = createTeleprompterWindow();
+  } else {
+    teleprompterWindow.show();
+  }
+  return { success: true };
+});
+ipcMain.handle("hide-teleprompter", () => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.hide();
+  }
+  return { success: true };
+});
+ipcMain.handle("close-teleprompter", () => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.close();
+    teleprompterWindow = null;
+  }
+  return { success: true };
+});
+ipcMain.handle("is-teleprompter-visible", () => {
+  return teleprompterWindow && !teleprompterWindow.isDestroyed() && teleprompterWindow.isVisible();
+});
+ipcMain.handle("update-teleprompter-content", (_, content) => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.webContents.send("teleprompter-content-update", content);
+  }
+  return { success: true };
+});
+let teleprompterResizeStart = null;
+ipcMain.handle("teleprompter-resize-start", () => {
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterResizeStart = teleprompterWindow.getBounds();
+  }
+  return { success: true };
+});
+ipcMain.handle("teleprompter-resize-move", (_, data) => {
+  if (!teleprompterWindow || teleprompterWindow.isDestroyed() || !teleprompterResizeStart) {
+    return { success: false };
+  }
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { workArea } = primaryDisplay;
+  const start = teleprompterResizeStart;
+  const dir = data.direction;
+  let newX = start.x;
+  let newY = start.y;
+  let newWidth = start.width;
+  let newHeight = start.height;
+  if (dir === "e" || dir === "se" || dir === "ne") {
+    newWidth = start.width + data.deltaX;
+  }
+  if (dir === "w" || dir === "sw" || dir === "nw") {
+    newWidth = start.width - data.deltaX;
+    newX = start.x + data.deltaX;
+  }
+  if (dir === "s" || dir === "se" || dir === "sw") {
+    newHeight = start.height + data.deltaY;
+  }
+  if (dir === "n" || dir === "ne" || dir === "nw") {
+    newHeight = start.height - data.deltaY;
+    newY = start.y + data.deltaY;
+  }
+  const minWidth = 280;
+  const minHeight = 200;
+  if (newWidth < minWidth) {
+    if (dir === "w" || dir === "sw" || dir === "nw") {
+      newX = start.x + start.width - minWidth;
+    }
+    newWidth = minWidth;
+  }
+  if (newHeight < minHeight) {
+    if (dir === "n" || dir === "ne" || dir === "nw") {
+      newY = start.y + start.height - minHeight;
+    }
+    newHeight = minHeight;
+  }
+  if (newX < workArea.x) {
+    newWidth = newWidth - (workArea.x - newX);
+    newX = workArea.x;
+  }
+  if (newY < workArea.y) {
+    newHeight = newHeight - (workArea.y - newY);
+    newY = workArea.y;
+  }
+  if (newX + newWidth > workArea.x + workArea.width) {
+    newWidth = workArea.x + workArea.width - newX;
+  }
+  if (newY + newHeight > workArea.y + workArea.height) {
+    newHeight = workArea.y + workArea.height - newY;
+  }
+  teleprompterWindow.setBounds({
+    x: Math.round(newX),
+    y: Math.round(newY),
+    width: Math.round(newWidth),
+    height: Math.round(newHeight)
+  });
+  return { success: true };
+});
+ipcMain.handle("teleprompter-resize-end", () => {
+  teleprompterResizeStart = null;
+  return { success: true };
 });
 ipcMain.handle("show-camera-preview", (_, options) => {
   if (!cameraPreviewWindow || cameraPreviewWindow.isDestroyed()) {
@@ -580,8 +706,10 @@ function createEditorWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    frame: false,
+    // 无边框窗口，使用自定义标题栏
+    titleBarStyle: isMac ? "hiddenInset" : "hidden",
     ...isMac && {
-      titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 12, y: 12 }
     },
     transparent: false,
@@ -1022,6 +1150,55 @@ function createCameraPreviewWindow(options) {
   win.on("closed", () => {
     if (cameraPreviewWindow === win) {
       cameraPreviewWindow = null;
+    }
+  });
+  return win;
+}
+function createTeleprompterWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { workArea } = primaryDisplay;
+  const windowWidth = 400;
+  const windowHeight = 500;
+  const padding = 20;
+  const x = workArea.x + workArea.width - windowWidth - padding;
+  const y = workArea.y + padding;
+  const isMac = process.platform === "darwin";
+  const win = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    // 禁用系统 resize，使用自定义 resize handles
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    minWidth: 300,
+    minHeight: 300,
+    maxWidth: 600,
+    maxHeight: 800,
+    webPreferences: {
+      preload: path.join(__dirname$1, "preload.mjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      backgroundThrottling: false
+    }
+  });
+  win.setAlwaysOnTop(true, isMac ? "floating" : "screen-saver", 0);
+  win.setContentProtection(true);
+  if (VITE_DEV_SERVER_URL$1) {
+    win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=teleprompter");
+  } else {
+    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), {
+      query: { windowType: "teleprompter" }
+    });
+  }
+  teleprompterWindow = win;
+  win.on("closed", () => {
+    if (teleprompterWindow === win) {
+      teleprompterWindow = null;
     }
   });
   return win;
