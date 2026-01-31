@@ -34,7 +34,19 @@ import {
   type CameraOverlay,
 } from "./types";
 import PictureInPicture from "./PictureInPicture";
-import { VideoExporter, GifExporter, type ExportProgress, type ExportQuality, type ExportSettings, type ExportFormat, type GifFrameRate, type GifSizePreset, GIF_SIZE_PRESETS, calculateOutputDimensions } from "@/lib/exporter";
+import { 
+  VideoExporter, 
+  GifExporter, 
+  ExportManager,
+  type ExportProgress, 
+  type ExportQuality, 
+  type ExportSettings, 
+  type ExportFormat, 
+  type GifFrameRate, 
+  type GifSizePreset, 
+  GIF_SIZE_PRESETS, 
+  calculateOutputDimensions 
+} from "@/lib/exporter";
 import { type AspectRatio, getAspectRatioValue } from "@/utils/aspectRatioUtils";
 import { getAssetPath } from "@/lib/assetPath";
 
@@ -92,7 +104,7 @@ export default function VideoEditor() {
   const nextTrimIdRef = useRef(1);
   const nextAnnotationIdRef = useRef(1);
   const nextAnnotationZIndexRef = useRef(1); // Track z-index for stacking order
-  const exporterRef = useRef<VideoExporter | null>(null);
+  const exporterRef = useRef<VideoExporter | ExportManager | null>(null);
 
   // Helper to convert file path to proper file:// URL
   const toFileUrl = (filePath: string): string => {
@@ -615,42 +627,6 @@ export default function VideoEditor() {
     }
   }, [selectedAnnotationId, annotationRegions]);
 
-  const handleOpenExportDialog = useCallback(() => {
-    if (!videoPath) {
-      toast.error('No video loaded');
-      return;
-    }
-
-    const video = videoPlaybackRef.current?.video;
-    if (!video) {
-      toast.error('Video not ready');
-      return;
-    }
-
-    // Build export settings from current state
-    const sourceWidth = video.videoWidth || 1920;
-    const sourceHeight = video.videoHeight || 1080;
-    const gifDimensions = calculateOutputDimensions(sourceWidth, sourceHeight, gifSizePreset, GIF_SIZE_PRESETS);
-
-    const settings: ExportSettings = {
-      format: exportFormat,
-      quality: exportFormat === 'mp4' ? exportQuality : undefined,
-      gifConfig: exportFormat === 'gif' ? {
-        frameRate: gifFrameRate,
-        loop: gifLoop,
-        sizePreset: gifSizePreset,
-        width: gifDimensions.width,
-        height: gifDimensions.height,
-      } : undefined,
-    };
-
-    setShowExportDialog(true);
-    setExportError(null);
-    
-    // Start export immediately
-    handleExport(settings);
-  }, [videoPath, exportFormat, exportQuality, gifFrameRate, gifLoop, gifSizePreset]);
-
   const handleExport = useCallback(async (settings: ExportSettings) => {
     if (!videoPath) {
       toast.error('No video loaded');
@@ -741,7 +717,7 @@ export default function VideoEditor() {
           toast.error(result.error || 'GIF export failed');
         }
       } else {
-        // MP4 Export
+        // MP4 Export - Using ExportManager for automatic optimization
         const quality = settings.quality || exportQuality;
         let exportWidth: number;
         let exportHeight: number;
@@ -766,7 +742,9 @@ export default function VideoEditor() {
           bitrate = 25_000_000;  // 25 Mbps for 4K
         }
 
-        const exporter = new VideoExporter({
+        // Use ExportManager for automatic strategy selection
+        // It will choose between standard, parallel, or WebGPU based on video properties
+        const exportManager = new ExportManager({
           videoUrl: videoPath,
           width: exportWidth,
           height: exportHeight,
@@ -786,14 +764,32 @@ export default function VideoEditor() {
           annotationRegions,
           previewWidth,
           previewHeight,
-          cameraOverlay: cameraOverlay.enabled ? cameraOverlay : undefined,
+          cameraOverlay: cameraOverlay.enabled ? { ...cameraOverlay } : undefined,
           onProgress: (progress: ExportProgress) => {
             setExportProgress(progress);
           },
         });
 
-        exporterRef.current = exporter;
-        const result = await exporter.export();
+        exporterRef.current = exportManager;
+        
+        // Get recommendations and log strategy (helpful for debugging)
+        const capabilities = await exportManager.getCapabilities();
+        console.log('[Export] Recommended strategy:', capabilities.recommendedStrategy.type);
+        console.log('[Export] Reason:', capabilities.recommendedStrategy.reason);
+        console.log('[Export] WebGPU available:', capabilities.webgpu);
+        console.log('[Export] Hardware concurrency:', capabilities.hardwareConcurrency);
+        
+        // Export with automatic strategy selection
+        // Will use hybrid/parallel for long videos, standard for camera overlay
+        const result = await exportManager.export();
+
+        // Log performance metrics after export
+        const metrics = exportManager.getPerformanceMetrics();
+        console.log('[Export] Performance:', {
+          totalFrames: metrics.totalFrames,
+          duration: `${(metrics.totalDuration / 1000).toFixed(2)}s`,
+          fps: metrics.framesPerSecond.toFixed(2),
+        });
 
         if (result.success && result.blob) {
           const arrayBuffer = await result.blob.arrayBuffer();
@@ -833,6 +829,42 @@ export default function VideoEditor() {
       setExportProgress(null);
     }
   }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, annotationRegions, isPlaying, aspectRatio, exportQuality, cameraOverlay]);
+
+  const handleOpenExportDialog = useCallback(() => {
+    if (!videoPath) {
+      toast.error('No video loaded');
+      return;
+    }
+
+    const video = videoPlaybackRef.current?.video;
+    if (!video) {
+      toast.error('Video not ready');
+      return;
+    }
+
+    // Build export settings from current state
+    const sourceWidth = video.videoWidth || 1920;
+    const sourceHeight = video.videoHeight || 1080;
+    const gifDimensions = calculateOutputDimensions(sourceWidth, sourceHeight, gifSizePreset, GIF_SIZE_PRESETS);
+
+    const settings: ExportSettings = {
+      format: exportFormat,
+      quality: exportFormat === 'mp4' ? exportQuality : undefined,
+      gifConfig: exportFormat === 'gif' ? {
+        frameRate: gifFrameRate,
+        loop: gifLoop,
+        sizePreset: gifSizePreset,
+        width: gifDimensions.width,
+        height: gifDimensions.height,
+      } : undefined,
+    };
+
+    setShowExportDialog(true);
+    setExportError(null);
+    
+    // Start export immediately
+    handleExport(settings);
+  }, [videoPath, exportFormat, exportQuality, gifFrameRate, gifLoop, gifSizePreset, handleExport]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {

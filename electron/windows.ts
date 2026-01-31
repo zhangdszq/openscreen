@@ -12,6 +12,7 @@ const RENDERER_DIST = path.join(APP_ROOT, 'dist')
 let hudOverlayWindow: BrowserWindow | null = null;
 let cameraPreviewWindow: BrowserWindow | null = null;
 let regionSelectorWindow: BrowserWindow | null = null;
+let regionIndicatorWindow: BrowserWindow | null = null;
 let regionSelectionResolve: ((region: { x: number; y: number; width: number; height: number } | null) => void) | null = null;
 
 ipcMain.on('hud-overlay-hide', () => {
@@ -52,6 +53,52 @@ ipcMain.handle('close-camera-preview', () => {
   closeCameraPreviewWindow();
   return { success: true };
 });
+
+// Region Indicator Window IPC handlers
+ipcMain.handle('show-region-indicator', (_, region: { x: number; y: number; width: number; height: number }) => {
+  if (!regionIndicatorWindow || regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow = createRegionIndicatorWindow(region);
+  } else {
+    updateRegionIndicatorWindow(region);
+    regionIndicatorWindow.show();
+  }
+  return { success: true };
+});
+
+ipcMain.handle('hide-region-indicator', () => {
+  if (regionIndicatorWindow && !regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow.hide();
+  }
+  return { success: true };
+});
+
+ipcMain.handle('close-region-indicator', () => {
+  closeRegionIndicatorWindow();
+  return { success: true };
+});
+
+ipcMain.handle('update-region-indicator', (_, data: { 
+  region?: { x: number; y: number; width: number; height: number };
+  isRecording?: boolean;
+  isPaused?: boolean;
+}) => {
+  if (regionIndicatorWindow && !regionIndicatorWindow.isDestroyed()) {
+    if (data.region) {
+      updateRegionIndicatorWindow(data.region);
+    }
+    // Send update to renderer
+    regionIndicatorWindow.webContents.send('region-indicator-update', data);
+  }
+  return { success: true };
+});
+
+// Export function to close region indicator window
+export function closeRegionIndicatorWindow() {
+  if (regionIndicatorWindow && !regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow.close();
+    regionIndicatorWindow = null;
+  }
+}
 
 // Export function to close camera preview window (used when app quits)
 export function closeCameraPreviewWindow() {
@@ -457,6 +504,9 @@ export function createHudOverlayWindow(): BrowserWindow {
   // HUD should be above camera, use 'pop-up-menu' on Mac and 'screen-saver' on Windows (but set after camera)
   win.setAlwaysOnTop(true, isMac ? 'pop-up-menu' : 'screen-saver');
 
+  // Prevent HUD from being captured during screen recording
+  // This works on Windows 10 2004+ and macOS
+  win.setContentProtection(true);
 
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
@@ -639,6 +689,87 @@ export function createRegionSelectorWindow(): BrowserWindow {
   });
   
   return win;
+}
+
+/**
+ * Create a region indicator window that shows a dashed border around the recording area
+ * This window floats on top of all windows during recording
+ */
+export function createRegionIndicatorWindow(region: { x: number; y: number; width: number; height: number }): BrowserWindow {
+  // Add some padding around the region for the border and label
+  const padding = 4;
+  const labelHeight = 32; // Space for the top label
+  
+  const win = new BrowserWindow({
+    x: region.x - padding,
+    y: region.y - padding - labelHeight,
+    width: region.width + padding * 2,
+    height: region.height + padding * 2 + labelHeight,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false, // Don't steal focus
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  
+  // Make sure it's on top of everything but can be clicked through
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setIgnoreMouseEvents(true); // Allow clicks to pass through
+  
+  // Don't let it be captured in recordings
+  win.setContentProtection(true);
+  
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=region-indicator');
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), {
+      query: { windowType: 'region-indicator' }
+    });
+  }
+  
+  // Send initial region data once window is ready
+  win.webContents.once('did-finish-load', () => {
+    win.webContents.send('region-indicator-update', {
+      region,
+      isRecording: true,
+      isPaused: false,
+    });
+  });
+  
+  regionIndicatorWindow = win;
+  
+  win.on('closed', () => {
+    if (regionIndicatorWindow === win) {
+      regionIndicatorWindow = null;
+    }
+  });
+  
+  return win;
+}
+
+/**
+ * Update the region indicator window position and size
+ */
+function updateRegionIndicatorWindow(region: { x: number; y: number; width: number; height: number }) {
+  if (!regionIndicatorWindow || regionIndicatorWindow.isDestroyed()) return;
+  
+  const padding = 4;
+  const labelHeight = 32;
+  
+  regionIndicatorWindow.setBounds({
+    x: region.x - padding,
+    y: region.y - padding - labelHeight,
+    width: region.width + padding * 2,
+    height: region.height + padding * 2 + labelHeight,
+  });
 }
 
 export function createSourceSelectorWindow(): BrowserWindow {

@@ -1,0 +1,10 @@
+D:\git-repos\openscreen\native\target\release\deps\thread_local-4e07d208c709512c.d: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\cached.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\thread_id.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\unreachable.rs
+
+D:\git-repos\openscreen\native\target\release\deps\libthread_local-4e07d208c709512c.rlib: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\cached.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\thread_id.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\unreachable.rs
+
+D:\git-repos\openscreen\native\target\release\deps\libthread_local-4e07d208c709512c.rmeta: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\cached.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\thread_id.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\unreachable.rs
+
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\cached.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\thread_id.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.9\src\unreachable.rs:

@@ -157,6 +157,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('get-screen-for-region', region)
   },
 
+  // Region Indicator APIs (for showing recording area overlay)
+  showRegionIndicator: (region: { x: number; y: number; width: number; height: number }) => {
+    return ipcRenderer.invoke('show-region-indicator', region)
+  },
+  hideRegionIndicator: () => {
+    return ipcRenderer.invoke('hide-region-indicator')
+  },
+  closeRegionIndicator: () => {
+    return ipcRenderer.invoke('close-region-indicator')
+  },
+  updateRegionIndicator: (data: { 
+    region?: { x: number; y: number; width: number; height: number };
+    isRecording?: boolean;
+    isPaused?: boolean;
+  }) => {
+    return ipcRenderer.invoke('update-region-indicator', data)
+  },
+  onRegionIndicatorUpdate: (callback: (event: any, data: any) => void) => {
+    ipcRenderer.on('region-indicator-update', callback)
+  },
+  removeRegionIndicatorListener: () => {
+    ipcRenderer.removeAllListeners('region-indicator-update')
+  },
+
   // Pro Feature APIs - Keyframes and Flow Graph
   saveKeyframeImage: (imageData: string, fileName: string) => {
     return ipcRenderer.invoke('save-keyframe-image', imageData, fileName)

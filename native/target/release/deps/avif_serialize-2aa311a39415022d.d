@@ -1,0 +1,10 @@
+D:\git-repos\openscreen\native\target\release\deps\avif_serialize-2aa311a39415022d.d: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\boxes.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\constants.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\writer.rs
+
+D:\git-repos\openscreen\native\target\release\deps\libavif_serialize-2aa311a39415022d.rlib: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\boxes.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\constants.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\writer.rs
+
+D:\git-repos\openscreen\native\target\release\deps\libavif_serialize-2aa311a39415022d.rmeta: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\boxes.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\constants.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\writer.rs
+
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\boxes.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\constants.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.6\src\writer.rs:

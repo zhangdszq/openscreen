@@ -35,8 +35,10 @@ export class VideoExporter {
   private audioExtractor: AudioExtractor | null = null;
   private cancelled = false;
   private encodeQueue = 0;
-  // Increased queue size for better throughput with hardware encoding
-  private readonly MAX_ENCODE_QUEUE = 120;
+  // Dynamically adjusted queue size based on encoding performance
+  private maxEncodeQueue = 120;
+  private readonly BASE_ENCODE_QUEUE = 60;
+  private readonly MAX_ENCODE_QUEUE_LIMIT = 200;
   private videoDescription: Uint8Array | undefined;
   private videoColorSpace: VideoColorSpaceInit | undefined;
   // Track muxing promises for parallel processing
@@ -46,9 +48,55 @@ export class VideoExporter {
   // Camera overlay canvas for compositing
   private cameraCanvas: HTMLCanvasElement | null = null;
   private cameraCtx: CanvasRenderingContext2D | null = null;
+  // Performance tracking for adaptive queue sizing (Remotion-style)
+  private frameTimings: number[] = [];
+  private encoderOutputCount = 0;
 
   constructor(config: VideoExporterConfig) {
     this.config = config;
+    // Initialize adaptive queue size based on resolution (Remotion approach)
+    this.maxEncodeQueue = this.calculateOptimalQueueSize();
+  }
+
+  /**
+   * Calculate optimal encode queue size based on resolution and hardware
+   * Higher resolution = smaller queue to avoid memory pressure
+   * (Inspired by Remotion's concurrency optimization)
+   */
+  private calculateOptimalQueueSize(): number {
+    const pixels = this.config.width * this.config.height;
+    const megapixels = pixels / 1_000_000;
+    
+    // Scale queue size inversely with resolution
+    // 1080p (~2MP) = base queue, 4K (~8MP) = smaller queue
+    if (megapixels > 6) {
+      return Math.max(30, this.BASE_ENCODE_QUEUE);
+    } else if (megapixels > 3) {
+      return Math.max(60, Math.floor(this.BASE_ENCODE_QUEUE * 1.5));
+    } else {
+      return this.MAX_ENCODE_QUEUE_LIMIT;
+    }
+  }
+
+  /**
+   * Adaptively adjust queue size based on encoder output rate
+   * (Remotion benchmark-style optimization)
+   */
+  private adjustQueueSizeBasedOnPerformance(): void {
+    if (this.frameTimings.length < 10) return;
+    
+    // Calculate average frame time from recent frames
+    const recentTimings = this.frameTimings.slice(-20);
+    const avgFrameTime = recentTimings.reduce((a, b) => a + b, 0) / recentTimings.length;
+    
+    // If encoder is keeping up well (low queue), increase queue for throughput
+    if (this.encodeQueue < this.maxEncodeQueue * 0.3 && avgFrameTime < 50) {
+      this.maxEncodeQueue = Math.min(this.maxEncodeQueue + 10, this.MAX_ENCODE_QUEUE_LIMIT);
+    }
+    // If encoder is falling behind, reduce queue to avoid memory issues
+    else if (this.encodeQueue > this.maxEncodeQueue * 0.9 && avgFrameTime > 100) {
+      this.maxEncodeQueue = Math.max(this.maxEncodeQueue - 10, this.BASE_ENCODE_QUEUE);
+    }
   }
 
   // Calculate the total duration excluding trim regions (in seconds)
@@ -194,11 +242,15 @@ export class VideoExporter {
       console.log('[VideoExporter] Total frames to export:', totalFrames);
 
       // Process frames continuously without batching delays
+      // Remotion optimization: track timing for adaptive performance
       const frameDuration = 1_000_000 / this.config.frameRate; // in microseconds
       let frameIndex = 0;
       const timeStep = 1 / this.config.frameRate;
+      const exportStartTime = performance.now();
+      let lastProgressUpdate = 0;
 
       while (frameIndex < totalFrames && !this.cancelled) {
+        const frameStartTime = performance.now();
         const i = frameIndex;
         const timestamp = i * frameDuration;
 
@@ -213,6 +265,7 @@ export class VideoExporter {
         if (needsSeek) {
           videoElement.currentTime = videoTime;
           // Wait for the frame to be ready using requestVideoFrameCallback
+          // Remotion uses similar approach for frame synchronization
           await new Promise<void>(resolve => {
             if ('requestVideoFrameCallback' in videoElement) {
               (videoElement as any).requestVideoFrameCallback(() => resolve());
@@ -354,30 +407,56 @@ export class VideoExporter {
           },
         });
 
-        // Check encoder queue before encoding to keep it full
-        while (this.encodeQueue >= this.MAX_ENCODE_QUEUE && !this.cancelled) {
+        // Check encoder queue before encoding - use adaptive queue size (Remotion-style)
+        while (this.encodeQueue >= this.maxEncodeQueue && !this.cancelled) {
+          // Yield to allow encoder output callbacks to run
           await new Promise(resolve => setTimeout(resolve, 0));
         }
 
         if (this.encoder && this.encoder.state === 'configured') {
           this.encodeQueue++;
-          this.encoder.encode(exportFrame, { keyFrame: i % 150 === 0 });
+          // Remotion optimization: adaptive keyframe interval based on content
+          // More keyframes = better seeking but larger file
+          const keyFrameInterval = this.config.bitrate > 15_000_000 ? 90 : 150;
+          this.encoder.encode(exportFrame, { keyFrame: i % keyFrameInterval === 0 });
         } else {
           console.warn(`[Frame ${i}] Encoder not ready! State: ${this.encoder?.state}`);
         }
 
         exportFrame.close();
 
+        // Track frame timing for adaptive optimization
+        const frameEndTime = performance.now();
+        const frameTime = frameEndTime - frameStartTime;
+        this.frameTimings.push(frameTime);
+        if (this.frameTimings.length > 100) {
+          this.frameTimings.shift(); // Keep only recent timings
+        }
+
+        // Adjust queue size periodically based on performance
+        if (frameIndex % 30 === 0) {
+          this.adjustQueueSizeBasedOnPerformance();
+        }
+
         frameIndex++;
 
-        // Update progress
-        if (this.config.onProgress) {
-          this.config.onProgress({
-            currentFrame: frameIndex,
-            totalFrames,
-            percentage: (frameIndex / totalFrames) * 100,
-            estimatedTimeRemaining: 0,
-          });
+        // Update progress with estimated time remaining (Remotion-style)
+        const now = performance.now();
+        if (now - lastProgressUpdate > 100 || frameIndex === totalFrames) { // Throttle updates
+          lastProgressUpdate = now;
+          const elapsedMs = now - exportStartTime;
+          const framesPerMs = frameIndex / elapsedMs;
+          const remainingFrames = totalFrames - frameIndex;
+          const estimatedTimeRemaining = remainingFrames / framesPerMs / 1000; // seconds
+
+          if (this.config.onProgress) {
+            this.config.onProgress({
+              currentFrame: frameIndex,
+              totalFrames,
+              percentage: (frameIndex / totalFrames) * 100,
+              estimatedTimeRemaining: Math.max(0, estimatedTimeRemaining),
+            });
+          }
         }
       }
 
@@ -470,6 +549,7 @@ export class VideoExporter {
 
         this.muxingPromises.push(muxingPromise);
         this.encodeQueue--;
+        this.encoderOutputCount++;
       },
       error: (error) => {
         console.error('[VideoExporter] Encoder error:', error);
@@ -575,5 +655,9 @@ export class VideoExporter {
     this.videoDescription = undefined;
     this.videoColorSpace = undefined;
     this.hasAudio = false;
+    // Reset performance tracking
+    this.frameTimings = [];
+    this.encoderOutputCount = 0;
+    this.maxEncodeQueue = this.calculateOptimalQueueSize();
   }
 }

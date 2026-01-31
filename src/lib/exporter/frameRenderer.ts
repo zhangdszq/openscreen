@@ -32,6 +32,12 @@ interface AnimationState {
   focusY: number;
 }
 
+// Remotion optimization: Cache shadow parameters to avoid recalculation
+interface ShadowCache {
+  intensity: number;
+  filterString: string;
+}
+
 // Renders video frames with all effects (background, zoom, crop, blur, shadow) to an offscreen canvas for export.
 
 export class FrameRenderer {
@@ -50,6 +56,8 @@ export class FrameRenderer {
   private animationState: AnimationState;
   private layoutCache: any = null;
   private currentVideoTime = 0;
+  // Remotion optimization: cache shadow filter string
+  private shadowCache: ShadowCache | null = null;
 
   constructor(config: FrameRenderConfig) {
     this.config = config;
@@ -78,15 +86,20 @@ export class FrameRenderer {
     }
 
     // Initialize PixiJS with optimized settings for export performance
+    // Remotion-style optimization: prefer performance over quality for rendering
     this.app = new Application();
     await this.app.init({
       canvas,
       width: this.config.width,
       height: this.config.height,
       backgroundAlpha: 0,
-      antialias: false,
+      antialias: false, // Disable anti-aliasing for better performance
       resolution: 1,
       autoDensity: true,
+      // Remotion optimization: use powerPreference for better GPU utilization
+      powerPreference: 'high-performance',
+      // Disable unnecessary features
+      hello: false,
     });
 
     // Setup containers
@@ -451,6 +464,30 @@ export class FrameRenderer {
     );
   }
 
+  /**
+   * Get cached shadow filter string or create new one
+   * Remotion optimization: avoid recalculating filter on every frame
+   */
+  private getShadowFilterString(intensity: number): string {
+    if (this.shadowCache && this.shadowCache.intensity === intensity) {
+      return this.shadowCache.filterString;
+    }
+
+    // Calculate shadow parameters based on intensity (0-1)
+    const baseBlur1 = 48 * intensity;
+    const baseBlur2 = 16 * intensity;
+    const baseBlur3 = 8 * intensity;
+    const baseAlpha1 = 0.7 * intensity;
+    const baseAlpha2 = 0.5 * intensity;
+    const baseAlpha3 = 0.3 * intensity;
+    const baseOffset = 12 * intensity;
+
+    const filterString = `drop-shadow(0 ${baseOffset}px ${baseBlur1}px rgba(0,0,0,${baseAlpha1})) drop-shadow(0 ${baseOffset/3}px ${baseBlur2}px rgba(0,0,0,${baseAlpha2})) drop-shadow(0 ${baseOffset/6}px ${baseBlur3}px rgba(0,0,0,${baseAlpha3}))`;
+
+    this.shadowCache = { intensity, filterString };
+    return filterString;
+  }
+
   private compositeWithShadows(): void {
     if (!this.compositeCanvas || !this.compositeCtx || !this.app) return;
 
@@ -479,22 +516,14 @@ export class FrameRenderer {
     }
 
     // Draw video layer with shadows on top of background
+    // Remotion optimization: use cached filter string
     if (this.config.showShadow && this.config.shadowIntensity > 0 && this.shadowCanvas && this.shadowCtx) {
       const shadowCtx = this.shadowCtx;
       shadowCtx.clearRect(0, 0, w, h);
       shadowCtx.save();
       
-      // Calculate shadow parameters based on intensity (0-1)
-      const intensity = this.config.shadowIntensity;
-      const baseBlur1 = 48 * intensity;
-      const baseBlur2 = 16 * intensity;
-      const baseBlur3 = 8 * intensity;
-      const baseAlpha1 = 0.7 * intensity;
-      const baseAlpha2 = 0.5 * intensity;
-      const baseAlpha3 = 0.3 * intensity;
-      const baseOffset = 12 * intensity;
-      
-      shadowCtx.filter = `drop-shadow(0 ${baseOffset}px ${baseBlur1}px rgba(0,0,0,${baseAlpha1})) drop-shadow(0 ${baseOffset/3}px ${baseBlur2}px rgba(0,0,0,${baseAlpha2})) drop-shadow(0 ${baseOffset/6}px ${baseBlur3}px rgba(0,0,0,${baseAlpha3}))`;
+      // Use cached shadow filter (Remotion-style memoization)
+      shadowCtx.filter = this.getShadowFilterString(this.config.shadowIntensity);
       shadowCtx.drawImage(videoCanvas, 0, 0, w, h);
       shadowCtx.restore();
       ctx.drawImage(this.shadowCanvas, 0, 0, w, h);

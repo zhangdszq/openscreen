@@ -245,6 +245,9 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       // Note: Mouse tracking is stopped in recorder.onstop to ensure
       // it captures all events until the very end
       
+      // Close region indicator overlay if it was shown
+      window.electronAPI?.closeRegionIndicator?.();
+      
       mediaRecorder.current.stop();
       setRecording(false);
 
@@ -579,6 +582,12 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       recordingTimestamp.current = Date.now();
       setRecording(true);
       window.electronAPI?.setRecordingState(true);
+      
+      // Update region indicator to recording state (indicator is already shown from selection)
+      if (isRegionSource) {
+        window.electronAPI?.updateRegionIndicator?.({ isRecording: true });
+        console.log('Region indicator updated to recording state');
+      }
       
       // Notify camera preview of recording state
       // Camera window uses setContentProtection(true) so it won't be captured

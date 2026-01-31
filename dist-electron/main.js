@@ -10,6 +10,7 @@ const RENDERER_DIST$1 = path.join(APP_ROOT, "dist");
 let hudOverlayWindow = null;
 let cameraPreviewWindow = null;
 let regionSelectorWindow = null;
+let regionIndicatorWindow = null;
 let regionSelectionResolve = null;
 ipcMain.on("hud-overlay-hide", () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
@@ -38,6 +39,40 @@ ipcMain.handle("close-camera-preview", () => {
   closeCameraPreviewWindow();
   return { success: true };
 });
+ipcMain.handle("show-region-indicator", (_, region) => {
+  if (!regionIndicatorWindow || regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow = createRegionIndicatorWindow(region);
+  } else {
+    updateRegionIndicatorWindow(region);
+    regionIndicatorWindow.show();
+  }
+  return { success: true };
+});
+ipcMain.handle("hide-region-indicator", () => {
+  if (regionIndicatorWindow && !regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow.hide();
+  }
+  return { success: true };
+});
+ipcMain.handle("close-region-indicator", () => {
+  closeRegionIndicatorWindow();
+  return { success: true };
+});
+ipcMain.handle("update-region-indicator", (_, data) => {
+  if (regionIndicatorWindow && !regionIndicatorWindow.isDestroyed()) {
+    if (data.region) {
+      updateRegionIndicatorWindow(data.region);
+    }
+    regionIndicatorWindow.webContents.send("region-indicator-update", data);
+  }
+  return { success: true };
+});
+function closeRegionIndicatorWindow() {
+  if (regionIndicatorWindow && !regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow.close();
+    regionIndicatorWindow = null;
+  }
+}
 function closeCameraPreviewWindow() {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
     cameraPreviewWindow.close();
@@ -307,6 +342,7 @@ function createHudOverlayWindow() {
     }
   });
   win.setAlwaysOnTop(true, isMac ? "pop-up-menu" : "screen-saver");
+  win.setContentProtection(true);
   win.webContents.on("did-finish-load", () => {
     win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
   });
@@ -445,6 +481,65 @@ function createRegionSelectorWindow() {
     }
   });
   return win;
+}
+function createRegionIndicatorWindow(region) {
+  const padding = 4;
+  const labelHeight = 32;
+  const win = new BrowserWindow({
+    x: region.x - padding,
+    y: region.y - padding - labelHeight,
+    width: region.width + padding * 2,
+    height: region.height + padding * 2 + labelHeight,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    // Don't steal focus
+    hasShadow: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname$1, "preload.mjs"),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setIgnoreMouseEvents(true);
+  win.setContentProtection(true);
+  if (VITE_DEV_SERVER_URL$1) {
+    win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=region-indicator");
+  } else {
+    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), {
+      query: { windowType: "region-indicator" }
+    });
+  }
+  win.webContents.once("did-finish-load", () => {
+    win.webContents.send("region-indicator-update", {
+      region,
+      isRecording: true,
+      isPaused: false
+    });
+  });
+  regionIndicatorWindow = win;
+  win.on("closed", () => {
+    if (regionIndicatorWindow === win) {
+      regionIndicatorWindow = null;
+    }
+  });
+  return win;
+}
+function updateRegionIndicatorWindow(region) {
+  if (!regionIndicatorWindow || regionIndicatorWindow.isDestroyed()) return;
+  const padding = 4;
+  const labelHeight = 32;
+  regionIndicatorWindow.setBounds({
+    x: region.x - padding,
+    y: region.y - padding - labelHeight,
+    width: region.width + padding * 2,
+    height: region.height + padding * 2 + labelHeight
+  });
 }
 function createSourceSelectorWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;

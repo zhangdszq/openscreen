@@ -1,0 +1,11 @@
+D:\git-repos\openscreen\native\target\release\deps\v_frame-9f38ff977ff283c2.d: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\frame.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\math.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\pixel.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\plane.rs
+
+D:\git-repos\openscreen\native\target\release\deps\libv_frame-9f38ff977ff283c2.rlib: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\frame.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\math.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\pixel.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\plane.rs
+
+D:\git-repos\openscreen\native\target\release\deps\libv_frame-9f38ff977ff283c2.rmeta: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\frame.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\math.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\pixel.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\plane.rs
+
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\frame.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\math.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\pixel.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\v_frame-0.3.9\src\plane.rs:

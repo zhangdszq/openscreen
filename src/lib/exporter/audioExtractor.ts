@@ -200,15 +200,18 @@ export class AudioExtractor {
       });
 
       // Configure encoder for AAC
+      // Remotion optimization: higher bitrate for better quality, or lower for speed
+      // AAC-LC is standard and widely supported
       encoder.configure({
         codec: 'mp4a.40.2', // AAC-LC
         sampleRate,
         numberOfChannels,
-        bitrate: 128000, // 128 kbps
+        bitrate: 192000, // 192 kbps for better quality (Remotion default)
       });
 
-      // Use larger batch size for better performance (4096 samples = ~85ms at 48kHz)
-      const samplesPerBatch = 4096;
+      // Remotion optimization: larger batch size for better throughput
+      // 8192 samples = ~170ms at 48kHz, reduces encoding overhead
+      const samplesPerBatch = 8192;
       const totalSamples = audioBuffer.length;
       let processedSamples = 0;
 

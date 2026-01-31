@@ -145,6 +145,25 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   getScreenForRegion: (region) => {
     return electron.ipcRenderer.invoke("get-screen-for-region", region);
   },
+  // Region Indicator APIs (for showing recording area overlay)
+  showRegionIndicator: (region) => {
+    return electron.ipcRenderer.invoke("show-region-indicator", region);
+  },
+  hideRegionIndicator: () => {
+    return electron.ipcRenderer.invoke("hide-region-indicator");
+  },
+  closeRegionIndicator: () => {
+    return electron.ipcRenderer.invoke("close-region-indicator");
+  },
+  updateRegionIndicator: (data) => {
+    return electron.ipcRenderer.invoke("update-region-indicator", data);
+  },
+  onRegionIndicatorUpdate: (callback) => {
+    electron.ipcRenderer.on("region-indicator-update", callback);
+  },
+  removeRegionIndicatorListener: () => {
+    electron.ipcRenderer.removeAllListeners("region-indicator-update");
+  },
   // Pro Feature APIs - Keyframes and Flow Graph
   saveKeyframeImage: (imageData, fileName) => {
     return electron.ipcRenderer.invoke("save-keyframe-image", imageData, fileName);

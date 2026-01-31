@@ -4,7 +4,33 @@ export interface ExportConfig {
   frameRate: number;
   bitrate: number;
   codec?: string;
+  // Remotion-inspired performance options
+  performanceMode?: 'quality' | 'balanced' | 'speed';
 }
+
+/**
+ * Remotion-inspired quality presets for different use cases
+ * - quality: Best visual quality, slower encoding
+ * - balanced: Good quality with reasonable speed (default)
+ * - speed: Fastest encoding, slightly lower quality
+ */
+export const PERFORMANCE_PRESETS = {
+  quality: {
+    keyFrameInterval: 60,
+    encoderLatencyMode: 'quality' as const,
+    audioBitrate: 256000,
+  },
+  balanced: {
+    keyFrameInterval: 90,
+    encoderLatencyMode: 'realtime' as const,
+    audioBitrate: 192000,
+  },
+  speed: {
+    keyFrameInterval: 150,
+    encoderLatencyMode: 'realtime' as const,
+    audioBitrate: 128000,
+  },
+} as const;
 
 export interface ExportProgress {
   currentFrame: number;

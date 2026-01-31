@@ -13,26 +13,50 @@ export class VideoFileDecoder {
   async loadVideo(videoUrl: string): Promise<DecodedVideoInfo> {
     this.videoElement = document.createElement('video');
     this.videoElement.src = videoUrl;
-    this.videoElement.preload = 'metadata';
+    this.videoElement.preload = 'auto';
+    this.videoElement.muted = true;
 
     return new Promise((resolve, reject) => {
-      this.videoElement!.addEventListener('loadedmetadata', () => {
-        const video = this.videoElement!;
-        
-        this.info = {
-          width: video.videoWidth,
-          height: video.videoHeight,
-          duration: video.duration,
-          frameRate: 60,
-          codec: 'avc1.640033',
-        };
+      const video = this.videoElement!;
+      let resolved = false;
+      
+      const doResolve = () => {
+        if (resolved) return;
+        if (video.videoWidth > 0 && video.duration > 0) {
+          resolved = true;
+          this.info = {
+            width: video.videoWidth,
+            height: video.videoHeight,
+            duration: video.duration,
+            frameRate: 60,
+            codec: 'avc1.640033',
+          };
+          resolve(this.info);
+        }
+      };
 
-        resolve(this.info);
-      });
+      video.onloadedmetadata = doResolve;
+      video.onloadeddata = doResolve;
+      video.oncanplay = doResolve;
+      
+      video.onerror = (e) => {
+        if (!resolved) {
+          resolved = true;
+          reject(new Error(`Failed to load video: ${e}`));
+        }
+      };
 
-      this.videoElement!.addEventListener('error', (e) => {
-        reject(new Error(`Failed to load video: ${e}`));
-      });
+      // Fallback timeout
+      setTimeout(() => {
+        if (!resolved) {
+          if (video.videoWidth > 0) {
+            doResolve();
+          } else {
+            resolved = true;
+            reject(new Error('Video load timeout'));
+          }
+        }
+      }, 10000);
     });
   }
 

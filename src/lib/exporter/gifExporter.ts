@@ -144,9 +144,19 @@ export class GifExporter {
       // Loop: 0 = infinite loop, 1 = play once (no loop)
       const repeat = this.config.loop ? 0 : 1;
       
+      // Remotion optimization: scale workers based on available cores
+      // navigator.hardwareConcurrency gives us the number of logical processors
+      const availableCores = navigator.hardwareConcurrency || 4;
+      const optimalWorkers = Math.min(Math.max(2, Math.floor(availableCores * 0.75)), 8);
+      
+      // Remotion optimization: adjust quality based on output size
+      // Higher resolution = lower quality for reasonable file size
+      const pixels = this.config.width * this.config.height;
+      const quality = pixels > 500000 ? 15 : 10; // Lower quality (faster) for high res
+      
       this.gif = new GIF({
-        workers: 4,
-        quality: 10,
+        workers: optimalWorkers,
+        quality,
         width: this.config.width,
         height: this.config.height,
         workerScript: GIF_WORKER_URL,
@@ -155,6 +165,8 @@ export class GifExporter {
         transparent: null,
         dither: 'FloydSteinberg',
       });
+      
+      console.log(`[GifExporter] Using ${optimalWorkers} workers, quality: ${quality}`);
 
       // Get the video element for frame extraction
       const videoElement = this.decoder.getVideoElement();

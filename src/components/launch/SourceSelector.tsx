@@ -56,6 +56,8 @@ export function SourceSelector() {
   const handleSourceSelect = (source: DesktopSource) => {
     setSelectedSource(source);
     setSelectedRegion(null); // Clear region when selecting a source
+    // Close region indicator when selecting a non-region source
+    window.electronAPI?.closeRegionIndicator?.();
   };
   
   const handleRegionSelect = async () => {
@@ -71,6 +73,8 @@ export function SourceSelector() {
         display_id: '',
         appIcon: null
       });
+      // Show green region indicator overlay immediately after selection
+      window.electronAPI?.showRegionIndicator?.(region);
     }
   };
   
