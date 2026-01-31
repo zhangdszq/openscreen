@@ -22,6 +22,8 @@ function PopoverContent({
   align = "center",
   sideOffset = 4,
   animated = true,
+  collisionPadding = 8,
+  avoidCollisions = true,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
   animated?: boolean
@@ -30,8 +32,11 @@ function PopoverContent({
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
         data-slot="popover-content"
+        data-popover="true"
         align={align}
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
+        avoidCollisions={avoidCollisions}
         className={cn(
           "bg-popover text-popover-foreground z-50 w-72 rounded-md border p-4 shadow-md outline-hidden",
           animated &&

@@ -2,6 +2,7 @@ import { BrowserWindow, screen } from 'electron'
 import { ipcMain } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getWindowUnderCursor, isWindowDetectionAvailable, type DetectedWindow } from './windowDetector'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -14,6 +15,8 @@ let cameraPreviewWindow: BrowserWindow | null = null;
 let regionSelectorWindow: BrowserWindow | null = null;
 let regionIndicatorWindow: BrowserWindow | null = null;
 let regionSelectionResolve: ((region: { x: number; y: number; width: number; height: number } | null) => void) | null = null;
+let windowPickerWindow: BrowserWindow | null = null;
+let windowPickerResolve: ((result: any) => void) | null = null;
 
 ipcMain.on('hud-overlay-hide', () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
@@ -467,22 +470,22 @@ export function createHudOverlayWindow(): BrowserWindow {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { workArea } = primaryDisplay;
 
-
-  const windowWidth = 500;
-  const windowHeight = 400; // Increased to allow popover menus to display
+  const windowWidth = 800;
+  const windowHeight = 800; // Increased height to allow popovers to extend upwards
 
   const x = Math.floor(workArea.x + (workArea.width - windowWidth) / 2);
-  const y = Math.floor(workArea.y + workArea.height - windowHeight - 5);
-
+  // 窗口置底：让窗口底部贴近屏幕底部（workArea 已排除任务栏）
+  const y = Math.floor(workArea.y + workArea.height - windowHeight); 
+  
   const isMac = process.platform === 'darwin';
   
   const win = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
-    minWidth: 500,
-    maxWidth: 500,
+    minWidth: 800,
+    maxWidth: 800,
     minHeight: 400,
-    maxHeight: 400,
+    maxHeight: 800,
     x: x,
     y: y,
     frame: false,
@@ -499,10 +502,14 @@ export function createHudOverlayWindow(): BrowserWindow {
     },
   })
   
-  // Set HUD overlay to higher level than camera preview window
+  // Set HUD overlay level
   // Camera uses 'floating' on Mac and 'screen-saver' on Windows
-  // HUD should be above camera, use 'pop-up-menu' on Mac and 'screen-saver' on Windows (but set after camera)
-  win.setAlwaysOnTop(true, isMac ? 'pop-up-menu' : 'screen-saver');
+  // HUD should be above camera but below region indicator
+  // Use relativeLevel to fine-tune: HUD at level 0, Region Indicator at level 1
+  win.setAlwaysOnTop(true, isMac ? 'pop-up-menu' : 'screen-saver', 0);
+
+  // Enable click-through for transparent parts
+  win.setIgnoreMouseEvents(true, { forward: true });
 
   // Prevent HUD from being captured during screen recording
   // This works on Windows 10 2004+ and macOS
@@ -607,6 +614,14 @@ ipcMain.handle('confirm-region-selection', (_, region: { x: number; y: number; w
     regionSelectorWindow = null;
   }
   
+  // 显示区域指示器，提示用户该区域即将录制
+  if (!regionIndicatorWindow || regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow = createRegionIndicatorWindow(region);
+  } else {
+    updateRegionIndicatorWindow(region);
+    regionIndicatorWindow.show();
+  }
+  
   return { success: true };
 });
 
@@ -624,6 +639,222 @@ ipcMain.handle('cancel-region-selection', () => {
   
   return { success: true };
 });
+
+// ============================================================================
+// Window Picker - 窗口选择器（网格视图）
+// ============================================================================
+
+// 打开窗口选择器
+ipcMain.handle('open-window-picker', async () => {
+  return new Promise((resolve) => {
+    windowPickerResolve = resolve;
+    
+    if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+      windowPickerWindow.focus();
+      return;
+    }
+    
+    createWindowPickerWindow();
+  });
+});
+
+// 确认选择窗口
+ipcMain.handle('confirm-window-picker', (_, windowInfo: any) => {
+  if (windowPickerResolve) {
+    windowPickerResolve(windowInfo);
+    windowPickerResolve = null;
+  }
+  
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.close();
+    windowPickerWindow = null;
+  }
+  
+  return { success: true };
+});
+
+// 取消窗口选择
+ipcMain.handle('cancel-window-picker', () => {
+  if (windowPickerResolve) {
+    windowPickerResolve(null);
+    windowPickerResolve = null;
+  }
+  
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.close();
+    windowPickerWindow = null;
+  }
+  
+  return { success: true };
+});
+
+// 隐藏窗口选择器（用于让用户点击目标窗口）
+ipcMain.handle('hide-window-picker', () => {
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.hide();
+  }
+  return { success: true };
+});
+
+// 显示窗口选择器
+ipcMain.handle('show-window-picker', () => {
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.show();
+    windowPickerWindow.focus();
+  }
+  return { success: true };
+});
+
+// 设置窗口选择器鼠标穿透
+ipcMain.handle('set-window-picker-ignore-mouse', (_, ignore: boolean) => {
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.setIgnoreMouseEvents(ignore, { forward: true });
+  }
+  return { success: true };
+});
+
+// 获取当前活跃窗口的 source 信息
+ipcMain.handle('get-active-window-source', async () => {
+  const { desktopCapturer } = await import('electron');
+  
+  // 获取所有窗口源
+  const sources = await desktopCapturer.getSources({
+    types: ['window'],
+    thumbnailSize: { width: 400, height: 300 },
+    fetchWindowIcons: true
+  });
+  
+  // 获取当前焦点窗口 - 用户刚点击的窗口应该是焦点窗口
+  // 过滤掉我们自己的窗口
+  const filteredSources = sources.filter(s => 
+    !s.name.includes('InsightView') && 
+    !s.name.includes('Electron') &&
+    !s.name.includes('WindowPicker') &&
+    s.name.trim() !== ''
+  );
+  
+  if (filteredSources.length > 0) {
+    // 返回第一个窗口（通常是最近激活的）
+    const source = filteredSources[0];
+    return {
+      id: source.id,
+      name: source.name.includes(' — ') ? source.name.split(' — ')[1] || source.name : source.name,
+      thumbnail: source.thumbnail ? source.thumbnail.toDataURL() : null,
+      appIcon: source.appIcon ? source.appIcon.toDataURL() : null
+    };
+  }
+  
+  return null;
+});
+
+// 检查窗口检测功能是否可用
+ipcMain.handle('is-window-detection-available', () => {
+  return isWindowDetectionAvailable();
+});
+
+// 获取鼠标下方的窗口信息（使用原生 API）
+ipcMain.handle('get-window-under-cursor', () => {
+  return getWindowUnderCursor();
+});
+
+// 根据窗口标题查找对应的 desktopCapturer source
+ipcMain.handle('find-window-source', async (_, title: string) => {
+  const { desktopCapturer } = await import('electron');
+  
+  const sources = await desktopCapturer.getSources({
+    types: ['window'],
+    thumbnailSize: { width: 400, height: 300 },
+    fetchWindowIcons: true
+  });
+  
+  // 尝试精确匹配
+  let source = sources.find(s => s.name === title || s.name.includes(title));
+  
+  // 如果没找到，尝试模糊匹配
+  if (!source) {
+    source = sources.find(s => 
+      s.name.toLowerCase().includes(title.toLowerCase()) ||
+      title.toLowerCase().includes(s.name.toLowerCase())
+    );
+  }
+  
+  if (source) {
+    return {
+      id: source.id,
+      name: source.name.includes(' — ') ? source.name.split(' — ')[1] || source.name : source.name,
+      thumbnail: source.thumbnail ? source.thumbnail.toDataURL() : null,
+      appIcon: source.appIcon ? source.appIcon.toDataURL() : null
+    };
+  }
+  
+  return null;
+});
+
+// 创建窗口选择器窗口
+export function createWindowPickerWindow(): BrowserWindow {
+  const displays = screen.getAllDisplays();
+  
+  // 计算覆盖所有显示器的边界
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const display of displays) {
+    minX = Math.min(minX, display.bounds.x);
+    minY = Math.min(minY, display.bounds.y);
+    maxX = Math.max(maxX, display.bounds.x + display.bounds.width);
+    maxY = Math.max(maxY, display.bounds.y + display.bounds.height);
+  }
+  
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const isMac = process.platform === 'darwin';
+  
+  const win = new BrowserWindow({
+    x: minX,
+    y: minY,
+    width,
+    height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    fullscreen: false,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  
+  // 确保在最顶层
+  win.setAlwaysOnTop(true, isMac ? 'pop-up-menu' : 'screen-saver', 1);
+  
+  // 不让它被录制
+  win.setContentProtection(true);
+  
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=window-picker');
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), {
+      query: { windowType: 'window-picker' }
+    });
+  }
+  
+  windowPickerWindow = win;
+  
+  win.on('closed', () => {
+    if (windowPickerWindow === win) {
+      windowPickerWindow = null;
+    }
+    if (windowPickerResolve) {
+      windowPickerResolve(null);
+      windowPickerResolve = null;
+    }
+  });
+  
+  return win;
+}
 
 export function createRegionSelectorWindow(): BrowserWindow {
   // Get all displays and create a window that covers all of them
@@ -661,8 +892,9 @@ export function createRegionSelectorWindow(): BrowserWindow {
     },
   });
   
-  // Make sure it's on top
-  win.setAlwaysOnTop(true, 'screen-saver');
+  // Make sure it's on top of everything including HUD overlay
+  const isMac = process.platform === 'darwin';
+  win.setAlwaysOnTop(true, isMac ? 'pop-up-menu' : 'screen-saver', 1);
   
   // Don't let it be captured
   win.setContentProtection(true);
@@ -720,9 +952,12 @@ export function createRegionIndicatorWindow(region: { x: number; y: number; widt
     },
   });
   
-  // Make sure it's on top of everything but can be clicked through
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setIgnoreMouseEvents(true); // Allow clicks to pass through
+  // Make sure it's on top of everything including HUD overlay
+  // Use higher relativeLevel (1) than HUD (0) to ensure it's above
+  const isMac = process.platform === 'darwin';
+  win.setAlwaysOnTop(true, isMac ? 'pop-up-menu' : 'screen-saver', 1);
+  // 允许鼠标事件穿透，但 forward 选项让我们可以在渲染进程中处理特定区域的点击
+  win.setIgnoreMouseEvents(true, { forward: true });
   
   // Don't let it be captured in recordings
   win.setContentProtection(true);
@@ -739,7 +974,7 @@ export function createRegionIndicatorWindow(region: { x: number; y: number; widt
   win.webContents.once('did-finish-load', () => {
     win.webContents.send('region-indicator-update', {
       region,
-      isRecording: true,
+      isRecording: false, // 初始状态：待录制
       isPaused: false,
     });
   });
@@ -772,7 +1007,7 @@ function updateRegionIndicatorWindow(region: { x: number; y: number; width: numb
   });
 }
 
-export function createSourceSelectorWindow(): BrowserWindow {
+export function createSourceSelectorWindow(mode?: 'window' | 'region' | 'all'): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   
   const win = new BrowserWindow({
@@ -794,11 +1029,13 @@ export function createSourceSelectorWindow(): BrowserWindow {
     },
   })
 
+  const selectorMode = mode || 'all'
+  
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=source-selector')
+    win.loadURL(VITE_DEV_SERVER_URL + `?windowType=source-selector&mode=${selectorMode}`)
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'), { 
-      query: { windowType: 'source-selector' } 
+      query: { windowType: 'source-selector', mode: selectorMode } 
     })
   }
 

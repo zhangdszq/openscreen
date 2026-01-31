@@ -7,6 +7,9 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   hudOverlayClose: () => {
     electron.ipcRenderer.send("hud-overlay-close");
   },
+  setIgnoreMouseEvents: (ignore, options) => {
+    electron.ipcRenderer.send("set-ignore-mouse-events", ignore, options);
+  },
   getAssetBasePath: async () => {
     return await electron.ipcRenderer.invoke("get-asset-base-path");
   },
@@ -16,8 +19,8 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   switchToEditor: () => {
     return electron.ipcRenderer.invoke("switch-to-editor");
   },
-  openSourceSelector: () => {
-    return electron.ipcRenderer.invoke("open-source-selector");
+  openSourceSelector: (mode) => {
+    return electron.ipcRenderer.invoke("open-source-selector", mode);
   },
   selectSource: (source) => {
     return electron.ipcRenderer.invoke("select-source", source);
@@ -144,6 +147,38 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   getScreenForRegion: (region) => {
     return electron.ipcRenderer.invoke("get-screen-for-region", region);
+  },
+  // Window Picker APIs (窗口选择器)
+  openWindowPicker: () => {
+    return electron.ipcRenderer.invoke("open-window-picker");
+  },
+  confirmWindowPicker: (windowInfo) => {
+    return electron.ipcRenderer.invoke("confirm-window-picker", windowInfo);
+  },
+  cancelWindowPicker: () => {
+    return electron.ipcRenderer.invoke("cancel-window-picker");
+  },
+  hideWindowPicker: () => {
+    return electron.ipcRenderer.invoke("hide-window-picker");
+  },
+  showWindowPicker: () => {
+    return electron.ipcRenderer.invoke("show-window-picker");
+  },
+  setWindowPickerIgnoreMouse: (ignore) => {
+    return electron.ipcRenderer.invoke("set-window-picker-ignore-mouse", ignore);
+  },
+  getActiveWindowSource: () => {
+    return electron.ipcRenderer.invoke("get-active-window-source");
+  },
+  // 原生窗口检测 API
+  isWindowDetectionAvailable: () => {
+    return electron.ipcRenderer.invoke("is-window-detection-available");
+  },
+  getWindowUnderCursor: () => {
+    return electron.ipcRenderer.invoke("get-window-under-cursor");
+  },
+  findWindowSource: (title) => {
+    return electron.ipcRenderer.invoke("find-window-source", title);
   },
   // Region Indicator APIs (for showing recording area overlay)
   showRegionIndicator: (region) => {

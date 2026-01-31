@@ -5,7 +5,8 @@
  * - Red: Recording in progress
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { FiX } from "react-icons/fi";
 
 interface RegionBounds {
   x: number;
@@ -29,6 +30,33 @@ export default function RegionIndicator({
   const [isRecording, setIsRecording] = useState(initialRecording);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // 处理鼠标移动，在关闭按钮区域时允许点击
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (closeButtonRef.current) {
+        const rect = closeButtonRef.current.getBoundingClientRect();
+        const isOverButton = 
+          e.clientX >= rect.left && 
+          e.clientX <= rect.right && 
+          e.clientY >= rect.top && 
+          e.clientY <= rect.bottom;
+        
+        // @ts-ignore
+        window.electronAPI?.setIgnoreMouseEvents?.(!isOverButton, { forward: true });
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    return () => document.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  // 关闭指示器
+  const handleClose = useCallback(() => {
+    // @ts-ignore
+    window.electronAPI?.closeRegionIndicator?.();
+  }, []);
 
   // Listen for region updates from main process
   useEffect(() => {
@@ -129,6 +157,7 @@ export default function RegionIndicator({
           backgroundColor: 'rgba(34, 197, 94, 0.95)', // Green background
           backdropFilter: 'blur(4px)',
           boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+          pointerEvents: 'auto', // 允许此区域接收鼠标事件
         }}
       >
         {/* Recording indicator dot */}
@@ -157,6 +186,18 @@ export default function RegionIndicator({
         <span className="text-white/70 text-xs">
           {currentBounds.width} × {currentBounds.height}
         </span>
+
+        {/* Close button - only show when not recording */}
+        {!isRecording && (
+          <button
+            ref={closeButtonRef}
+            onClick={handleClose}
+            className="ml-1 p-0.5 rounded hover:bg-white/20 transition-colors"
+            title="关闭"
+          >
+            <FiX size={14} className="text-white" />
+          </button>
+        )}
       </div>
 
       {/* Inline styles for animations */}

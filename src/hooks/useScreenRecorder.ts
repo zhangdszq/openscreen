@@ -20,6 +20,11 @@ export interface MicrophoneSettings {
   deviceId: string | null;
 }
 
+export interface SystemAudioSettings {
+  enabled: boolean;
+  volume: number; // 0-100
+}
+
 export interface CameraDevice {
   deviceId: string;
   label: string;
@@ -42,6 +47,8 @@ type UseScreenRecorderReturn = {
   setMicrophoneSettings: React.Dispatch<React.SetStateAction<MicrophoneSettings>>;
   availableMicrophones: MicrophoneDevice[];
   refreshMicrophones: () => Promise<void>;
+  systemAudioSettings: SystemAudioSettings;
+  setSystemAudioSettings: React.Dispatch<React.SetStateAction<SystemAudioSettings>>;
 };
 
 const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
@@ -49,7 +56,7 @@ const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
   deviceId: null,
   shape: "circle",
   size: 15, // 15% of screen width
-  position: "bottom-right",
+  position: "bottom-left",
   borderStyle: "shadow", // Mac-style shadow by default
   shadowIntensity: 60, // Default shadow intensity (0-100)
 };
@@ -59,6 +66,11 @@ const DEFAULT_MICROPHONE_SETTINGS: MicrophoneSettings = {
   deviceId: null,
 };
 
+const DEFAULT_SYSTEM_AUDIO_SETTINGS: SystemAudioSettings = {
+  enabled: true, // 系统声音默认开启
+  volume: 100,
+};
+
 export function useScreenRecorder(): UseScreenRecorderReturn {
   const [recording, setRecording] = useState(false);
   const [cameraSettings, setCameraSettings] = useState<CameraSettings>(DEFAULT_CAMERA_SETTINGS);
@@ -66,10 +78,12 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
   const [cameraPreviewStream, setCameraPreviewStream] = useState<MediaStream | null>(null);
   const [microphoneSettings, setMicrophoneSettings] = useState<MicrophoneSettings>(DEFAULT_MICROPHONE_SETTINGS);
   const [availableMicrophones, setAvailableMicrophones] = useState<MicrophoneDevice[]>([]);
+  const [systemAudioSettings, setSystemAudioSettings] = useState<SystemAudioSettings>(DEFAULT_SYSTEM_AUDIO_SETTINGS);
   
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
-  const audioStream = useRef<MediaStream | null>(null);
+  const audioStream = useRef<MediaStream | null>(null); // 麦克风音频流
+  const systemAudioStream = useRef<MediaStream | null>(null); // 系统声音流
   const chunks = useRef<Blob[]>([]);
   const startTime = useRef<number>(0);
   const recordingTimestamp = useRef<number>(0);
@@ -227,10 +241,16 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         stream.current = null;
       }
       
-      // Stop audio stream
+      // Stop microphone audio stream
       if (audioStream.current) {
         audioStream.current.getTracks().forEach(track => track.stop());
         audioStream.current = null;
+      }
+      
+      // Stop system audio stream
+      if (systemAudioStream.current) {
+        systemAudioStream.current.getTracks().forEach(track => track.stop());
+        systemAudioStream.current = null;
       }
       
       // Stop camera recording
@@ -283,6 +303,10 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       if (audioStream.current) {
         audioStream.current.getTracks().forEach(track => track.stop());
         audioStream.current = null;
+      }
+      if (systemAudioStream.current) {
+        systemAudioStream.current.getTracks().forEach(track => track.stop());
+        systemAudioStream.current = null;
       }
       if (cameraStream.current) {
         cameraStream.current.getTracks().forEach(track => track.stop());
@@ -345,8 +369,16 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       
       console.log('Recording source ID:', actualSourceId, 'isWindow:', isWindowSource, 'isRegion:', isRegionSource);
 
+      // 判断是否需要系统声音 - 只有开启且有可用的 sourceId 时才捕获
+      const captureSystemAudio = systemAudioSettings.enabled && actualSourceId;
+      
       const mediaStream = await (navigator.mediaDevices as any).getUserMedia({
-        audio: false,
+        audio: captureSystemAudio ? {
+          mandatory: {
+            chromeMediaSource: "desktop",
+            chromeMediaSourceId: actualSourceId,
+          },
+        } : false,
         video: {
           mandatory: {
             chromeMediaSource: "desktop",
@@ -359,6 +391,29 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         },
       });
       stream.current = mediaStream;
+      
+      // 如果成功捕获了系统声音，保存引用（用于后续调节音量）
+      if (captureSystemAudio && mediaStream.getAudioTracks().length > 0) {
+        // 创建一个只包含系统音频轨道的流用于引用管理
+        systemAudioStream.current = new MediaStream(mediaStream.getAudioTracks());
+        console.log('系统声音捕获成功');
+        
+        // 应用音量设置
+        if (systemAudioSettings.volume < 100) {
+          const audioContext = new AudioContext();
+          const source = audioContext.createMediaStreamSource(systemAudioStream.current);
+          const gainNode = audioContext.createGain();
+          gainNode.gain.value = systemAudioSettings.volume / 100;
+          const destination = audioContext.createMediaStreamDestination();
+          source.connect(gainNode);
+          gainNode.connect(destination);
+          
+          // 替换原始音轨为调节后的音轨
+          const originalAudioTracks = mediaStream.getAudioTracks();
+          originalAudioTracks.forEach(track => mediaStream.removeTrack(track));
+          destination.stream.getAudioTracks().forEach(track => mediaStream.addTrack(track));
+        }
+      }
       if (!stream.current) {
         throw new Error("Media stream is not available.");
       }
@@ -414,7 +469,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       // Use the screen stream directly (no camera compositing)
       const recordingStream = stream.current;
 
-      // Get microphone stream if enabled
+      // 获取麦克风流并混音
       if (microphoneSettings.enabled && microphoneSettings.deviceId) {
         try {
           const micStream = await navigator.mediaDevices.getUserMedia({
@@ -428,12 +483,56 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
           });
           audioStream.current = micStream;
           
-          // Add audio tracks to recording stream
-          micStream.getAudioTracks().forEach(track => {
-            recordingStream.addTrack(track);
-          });
+          // 检查是否需要混音（同时有系统声音和麦克风）
+          const hasSystemAudio = recordingStream.getAudioTracks().length > 0;
+          
+          if (hasSystemAudio) {
+            // 需要混音：使用 AudioContext 合并系统声音和麦克风
+            try {
+              const audioContext = new AudioContext();
+              const systemSource = audioContext.createMediaStreamSource(
+                new MediaStream(recordingStream.getAudioTracks())
+              );
+              const micSource = audioContext.createMediaStreamSource(micStream);
+              const destination = audioContext.createMediaStreamDestination();
+              
+              // 创建增益节点来控制各自的音量
+              const systemGain = audioContext.createGain();
+              const micGain = audioContext.createGain();
+              
+              systemGain.gain.value = systemAudioSettings.volume / 100;
+              micGain.gain.value = 1.0; // 麦克风音量可以后续添加控制
+              
+              // 连接音频节点
+              systemSource.connect(systemGain);
+              micSource.connect(micGain);
+              systemGain.connect(destination);
+              micGain.connect(destination);
+              
+              // 移除原有的系统声音轨道，添加混音后的轨道
+              recordingStream.getAudioTracks().forEach(track => {
+                recordingStream.removeTrack(track);
+              });
+              destination.stream.getAudioTracks().forEach(track => {
+                recordingStream.addTrack(track);
+              });
+              
+              console.log('系统声音与麦克风混音成功');
+            } catch (mixError) {
+              console.warn('混音失败，将单独添加麦克风音轨:', mixError);
+              // 混音失败时，直接添加麦克风音轨
+              micStream.getAudioTracks().forEach(track => {
+                recordingStream.addTrack(track);
+              });
+            }
+          } else {
+            // 没有系统声音，直接添加麦克风音轨
+            micStream.getAudioTracks().forEach(track => {
+              recordingStream.addTrack(track);
+            });
+          }
         } catch (error) {
-          console.warn('Failed to get microphone stream, recording without audio:', error);
+          console.warn('获取麦克风流失败，录制将不包含麦克风音频:', error);
         }
       }
 
@@ -597,7 +696,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         console.log('Camera preview will not be captured (content protection enabled)');
       }
     } catch (error) {
-      console.error('Failed to start recording:', error);
+      console.error('录制启动失败:', error);
       setRecording(false);
       if (stream.current) {
         stream.current.getTracks().forEach(track => track.stop());
@@ -606,6 +705,10 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       if (audioStream.current) {
         audioStream.current.getTracks().forEach(track => track.stop());
         audioStream.current = null;
+      }
+      if (systemAudioStream.current) {
+        systemAudioStream.current.getTracks().forEach(track => track.stop());
+        systemAudioStream.current = null;
       }
     }
   };
@@ -626,5 +729,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
     setMicrophoneSettings,
     availableMicrophones,
     refreshMicrophones,
+    systemAudioSettings,
+    setSystemAudioSettings,
   };
 }

@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     hudOverlayClose: () => {
       ipcRenderer.send('hud-overlay-close');
     },
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => {
+    ipcRenderer.send('set-ignore-mouse-events', ignore, options)
+  },
   getAssetBasePath: async () => {
     // ask main process for the correct base path (production vs dev)
     return await ipcRenderer.invoke('get-asset-base-path')
@@ -17,8 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchToEditor: () => {
     return ipcRenderer.invoke('switch-to-editor')
   },
-  openSourceSelector: () => {
-    return ipcRenderer.invoke('open-source-selector')
+  openSourceSelector: (mode?: 'window' | 'region' | 'all') => {
+    return ipcRenderer.invoke('open-source-selector', mode)
   },
   selectSource: (source: any) => {
     return ipcRenderer.invoke('select-source', source)
@@ -155,6 +158,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getScreenForRegion: (region: { x: number; y: number; width: number; height: number }) => {
     return ipcRenderer.invoke('get-screen-for-region', region)
+  },
+
+  // Window Picker APIs (窗口选择器)
+  openWindowPicker: () => {
+    return ipcRenderer.invoke('open-window-picker')
+  },
+  confirmWindowPicker: (windowInfo: { id: string; name: string }) => {
+    return ipcRenderer.invoke('confirm-window-picker', windowInfo)
+  },
+  cancelWindowPicker: () => {
+    return ipcRenderer.invoke('cancel-window-picker')
+  },
+  hideWindowPicker: () => {
+    return ipcRenderer.invoke('hide-window-picker')
+  },
+  showWindowPicker: () => {
+    return ipcRenderer.invoke('show-window-picker')
+  },
+  setWindowPickerIgnoreMouse: (ignore: boolean) => {
+    return ipcRenderer.invoke('set-window-picker-ignore-mouse', ignore)
+  },
+  getActiveWindowSource: () => {
+    return ipcRenderer.invoke('get-active-window-source')
+  },
+  // 原生窗口检测 API
+  isWindowDetectionAvailable: () => {
+    return ipcRenderer.invoke('is-window-detection-available')
+  },
+  getWindowUnderCursor: () => {
+    return ipcRenderer.invoke('get-window-under-cursor')
+  },
+  findWindowSource: (title: string) => {
+    return ipcRenderer.invoke('find-window-source', title)
   },
 
   // Region Indicator APIs (for showing recording area overlay)

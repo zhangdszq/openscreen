@@ -13,7 +13,7 @@ interface Window {
   electronAPI: {
     getSources: (opts: Electron.SourcesOptions) => Promise<ProcessedDesktopSource[]>
     switchToEditor: () => Promise<void>
-    openSourceSelector: () => Promise<void>
+    openSourceSelector: (mode?: 'window' | 'region' | 'all') => Promise<void>
     selectSource: (source: any) => Promise<any>
     getSelectedSource: () => Promise<any>
     storeRecordedVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{

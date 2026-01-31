@@ -4,6 +4,7 @@ import { SourceSelector } from "./components/launch/SourceSelector";
 import { CameraPreviewWindow } from "./components/launch/CameraPreviewWindow";
 import { RegionSelector } from "./components/launch/RegionSelector";
 import RegionIndicator from "./components/launch/RegionIndicator";
+import { WindowPicker } from "./components/launch/WindowPicker";
 import VideoEditor from "./components/video-editor/VideoEditor";
 
 export default function App() {
@@ -13,7 +14,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const type = params.get('windowType') || '';
     setWindowType(type);
-    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview' || type === 'region-selector' || type === 'region-indicator') {
+    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview' || type === 'region-selector' || type === 'region-indicator' || type === 'window-picker') {
       document.body.style.background = 'transparent';
       document.documentElement.style.background = 'transparent';
       document.getElementById('root')?.style.setProperty('background', 'transparent');
@@ -36,6 +37,8 @@ export default function App() {
       return <RegionSelector />;
     case 'region-indicator':
       return <RegionIndicator isRecording={true} />;
+    case 'window-picker':
+      return <WindowPicker />;
     case 'editor':
       return <VideoEditor />;
       default:

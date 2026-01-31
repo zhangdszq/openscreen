@@ -67,6 +67,19 @@ function getTrayIcon(filename: string) {
 }
 
 
+function showMainWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+    showCameraPreviewWindowIfExists();
+  } else {
+    createWindow();
+  }
+}
+
 function updateTrayMenu(recording: boolean = false) {
   if (!tray) return;
   const trayIcon = recording ? recordingTrayIcon : defaultTrayIcon;
@@ -84,20 +97,13 @@ function updateTrayMenu(recording: boolean = false) {
       ]
     : [
         {
-          label: "Open",
+          label: "打开中控台",
           click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              if (mainWindow.isMinimized()) {
-                mainWindow.restore();
-                showCameraPreviewWindowIfExists();
-              }
-            } else {
-              createWindow();
-            }
+            showMainWindow();
           },
         },
         {
-          label: "Quit",
+          label: "退出",
           click: () => {
             app.quit();
           },
@@ -106,6 +112,12 @@ function updateTrayMenu(recording: boolean = false) {
   tray.setImage(trayIcon);
   tray.setToolTip(trayToolTip);
   tray.setContextMenu(Menu.buildFromTemplate(menuTemplate));
+  
+  // Add click event to show window when clicking tray icon
+  tray.removeAllListeners('click');
+  tray.on('click', () => {
+    showMainWindow();
+  });
 }
 
 function createEditorWindowWrapper() {
@@ -116,8 +128,8 @@ function createEditorWindowWrapper() {
   mainWindow = createEditorWindow()
 }
 
-function createSourceSelectorWindowWrapper() {
-  sourceSelectorWindow = createSourceSelectorWindow()
+function createSourceSelectorWindowWrapper(mode?: 'window' | 'region' | 'all') {
+  sourceSelectorWindow = createSourceSelectorWindow(mode)
   sourceSelectorWindow.on('closed', () => {
     sourceSelectorWindow = null
   })
@@ -148,11 +160,15 @@ app.on('activate', () => {
 
 // Register all IPC handlers when app is ready
 app.whenReady().then(async () => {
-    // Listen for HUD overlay quit event
+    // Listen for HUD overlay close event - hide to tray instead of quitting
     const { ipcMain } = await import('electron');
     ipcMain.on('hud-overlay-close', () => {
-      closeCameraPreviewWindow(); // Close camera preview before quitting
-      app.quit();
+      // Hide windows instead of quitting - go to tray mode
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.hide();
+      }
+      hideCameraPreviewWindow(); // Hide camera preview
+      updateTrayMenu(); // Update tray menu
     });
     createTray()
     updateTrayMenu()

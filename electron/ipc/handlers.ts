@@ -9,11 +9,16 @@ let selectedSource: any = null
 
 export function registerIpcHandlers(
   createEditorWindow: () => void,
-  createSourceSelectorWindow: () => BrowserWindow,
+  createSourceSelectorWindow: (mode?: 'window' | 'region' | 'all') => BrowserWindow,
   getMainWindow: () => BrowserWindow | null,
   getSourceSelectorWindow: () => BrowserWindow | null,
   onRecordingStateChange?: (recording: boolean, sourceName: string) => void
 ) {
+  ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    win?.setIgnoreMouseEvents(ignore, options)
+  })
+
   ipcMain.handle('get-sources', async (_, opts) => {
     const sources = await desktopCapturer.getSources(opts)
     return sources.map(source => ({
@@ -38,13 +43,13 @@ export function registerIpcHandlers(
     return selectedSource
   })
 
-  ipcMain.handle('open-source-selector', () => {
+  ipcMain.handle('open-source-selector', (_, mode?: 'window' | 'region' | 'all') => {
     const sourceSelectorWin = getSourceSelectorWindow()
     if (sourceSelectorWin) {
       sourceSelectorWin.focus()
       return
     }
-    createSourceSelectorWindow()
+    createSourceSelectorWindow(mode)
   })
 
   ipcMain.handle('switch-to-editor', () => {

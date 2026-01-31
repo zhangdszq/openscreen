@@ -1,41 +1,190 @@
+.electronDrag {
+  -webkit-app-region: drag;
+}
 
+.electronNoDrag {
+  -webkit-app-region: no-drag;
+}
+
+/* macOS 风格毛玻璃主容器 */
 .glassContainer {
-  background: linear-gradient(135deg, rgba(28,28,34,0.92) 0%, rgba(18,18,22,0.88) 100%);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  border-radius: 14px;
-  box-shadow: 0 4px 16px 0 rgba(0,0,0,0.32), 0 1px 3px 0 rgba(0,0,0,0.18) inset;
-  border: 1px solid rgba(60,60,80,0.18);
+  background: rgba(20, 20, 22, 0.92);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 
+    0 25px 50px -12px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.08) inset;
 }
 
-.sourceCard {
+/* macOS 风格毛玻璃卡片 */
+.glassCard {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.glassCard:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.3);
+}
+
+.glassCardSelected {
+  background: rgba(52, 178, 123, 0.12) !important;
+  border-color: rgba(52, 178, 123, 0.5) !important;
+  box-shadow: 
+    0 0 0 1px rgba(52, 178, 123, 0.3),
+    0 8px 24px -4px rgba(52, 178, 123, 0.2);
+}
+
+/* macOS 风格按钮 */
+.glassButton {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glassButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Tab 样式 */
+.tabsList {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
-  background: linear-gradient(120deg, rgba(38,38,48,0.98) 0%, rgba(24,24,32,0.96) 100%);
-  border: 1px solid rgba(60,60,80,0.22);
-  box-shadow: 0 2px 8px 0 rgba(0,0,0,0.18);
-  transition: box-shadow 0.2s, border 0.2s, background 0.2s;
+  padding: 3px;
 }
 
-.selected {
-  border: 2px solid #34B27B;
-  background: linear-gradient(120deg, rgba(91,33,182,0.18) 0%, rgba(38,38,48,0.98) 100%);
-  box-shadow: 0 0 0 2px #34B27B33;
-}
-
-.icon {
-  width: 13px;
-  height: 13px;
-  color: #c7d2fe;
-}
-
-.name {
-  font-size: 0.85rem;
-  color: #f3f4f6;
+.tabTrigger {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.01em;
+  padding: 6px 16px;
+  border-radius: 7px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
 }
 
-.cardText {
-  color: #a1a1aa;
-  font-size: 0.75rem;
+.tabTrigger:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tabTriggerActive {
+  background: rgba(52, 178, 123, 0.9) !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(52, 178, 123, 0.3);
+}
+
+/* macOS 风格滚动条 */
+.macScrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.macScrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.macScrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.macScrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.macScrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* 标题栏样式 */
+.titleBar {
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 图标样式 */
+.icon {
+  width: 14px;
+  height: 14px;
+  color: white;
+}
+
+/* 名称样式 */
+.name {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+}
+
+/* 缩略图样式 */
+.thumbnail {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* 底部操作栏 */
+.footer {
+  background: rgba(255, 255, 255, 0.02);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 主按钮 */
+.primaryButton {
+  background: rgba(52, 178, 123, 0.9);
+  color: white;
+  font-weight: 500;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 8px;
+  border: none;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(52, 178, 123, 0.25);
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: rgba(52, 178, 123, 1);
+  box-shadow: 0 4px 12px rgba(52, 178, 123, 0.35);
+}
+
+.primaryButton:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* 次要按钮 */
+.secondaryButton {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.15s ease;
+}
+
+.secondaryButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
 }

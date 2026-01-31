@@ -1,18 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import styles from "./LaunchWindow.module.css";
-import { useScreenRecorder, CameraShape, CameraPosition, CameraBorderStyle } from "../../hooks/useScreenRecorder";
-import { Button } from "../ui/button";
+import { useScreenRecorder } from "../../hooks/useScreenRecorder";
 import { BsRecordCircle } from "react-icons/bs";
 import { FaRegStopCircle } from "react-icons/fa";
-import { MdMonitor } from "react-icons/md";
-import { RxDragHandleDots2 } from "react-icons/rx";
-import { FaFolderMinus } from "react-icons/fa6";
-import { FiMinus, FiX } from "react-icons/fi";
-import { BsCameraVideo, BsCameraVideoOff, BsMic, BsMicMute } from "react-icons/bs";
-import { IoSettingsOutline } from "react-icons/io5";
-import { ContentClamp } from "../ui/content-clamp";
+import { MdMonitor, MdCropFree, MdWindow } from "react-icons/md";
+import { FiMinus, FiX, FiFolder, FiChevronDown, FiMonitor, FiMic, FiVolume2, FiFileText } from "react-icons/fi";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { Slider } from "../ui/slider";
+
+type RecordingMode = 'fullscreen' | 'region' | 'window';
 
 export function LaunchWindow() {
   const { 
@@ -21,30 +16,33 @@ export function LaunchWindow() {
     cameraSettings, 
     setCameraSettings, 
     availableCameras, 
-    refreshCameras,
     cameraPreviewStream,
     microphoneSettings,
     setMicrophoneSettings,
     availableMicrophones,
+    refreshCameras,
     refreshMicrophones,
+    systemAudioSettings,
+    setSystemAudioSettings,
   } = useScreenRecorder();
+  
   const [recordingStart, setRecordingStart] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [selectedMode, setSelectedMode] = useState<RecordingMode>('fullscreen');
   const [showCameraSettings, setShowCameraSettings] = useState(false);
-  const [showMicSettings, setShowMicSettings] = useState(false);
+  const [showSystemAudioSettings, setShowSystemAudioSettings] = useState(false);
   const cameraPreviewRef = useRef<HTMLVideoElement>(null);
 
-  // Connect camera preview stream to video element (for settings panel)
+  // Connect camera preview stream
   useEffect(() => {
     if (cameraPreviewRef.current && cameraPreviewStream) {
       cameraPreviewRef.current.srcObject = cameraPreviewStream;
     }
   }, [cameraPreviewStream]);
 
-  // Show/hide camera preview window based on enabled state
+  // Camera preview window management
   useEffect(() => {
     if (cameraSettings.enabled) {
-      // Show external camera preview window with initial settings
       window.electronAPI?.showCameraPreview?.({
         size: cameraSettings.size,
         shape: cameraSettings.shape,
@@ -53,50 +51,32 @@ export function LaunchWindow() {
         shadowIntensity: cameraSettings.shadowIntensity,
       });
     } else {
-      // Hide camera preview window when disabled
       window.electronAPI?.hideCameraPreview?.();
     }
-    // Only depend on enabled state - other settings are updated separately
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraSettings.enabled]);
 
-  // Update camera preview settings without resetting position
-  // Only update borderStyle and shadowIntensity (visual-only changes)
+  // Sync camera settings
   useEffect(() => {
     if (cameraSettings.enabled) {
       window.electronAPI?.updateCameraPreview?.({
         borderStyle: cameraSettings.borderStyle,
         shadowIntensity: cameraSettings.shadowIntensity,
-      });
-    }
-  }, [cameraSettings.enabled, cameraSettings.borderStyle, cameraSettings.shadowIntensity]);
-
-  // Update camera preview size/shape/position (these may affect window bounds)
-  useEffect(() => {
-    if (cameraSettings.enabled) {
-      window.electronAPI?.updateCameraPreview?.({
         size: cameraSettings.size,
         shape: cameraSettings.shape,
         position: cameraSettings.position,
+        recording
       });
     }
-  }, [cameraSettings.enabled, cameraSettings.size, cameraSettings.shape, cameraSettings.position]);
+  }, [cameraSettings, recording]);
 
-  // Update camera preview recording state separately
-  useEffect(() => {
-    if (cameraSettings.enabled) {
-      window.electronAPI?.updateCameraPreview?.({ recording });
-    }
-  }, [recording, cameraSettings.enabled]);
-
-
-  // Cleanup camera preview window on unmount
+  // Cleanup
   useEffect(() => {
     return () => {
       window.electronAPI?.closeCameraPreview?.();
     };
   }, []);
 
+  // Timer
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
     if (recording) {
@@ -121,465 +101,392 @@ export function LaunchWindow() {
     const s = (seconds % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
-  const [selectedSource, setSelectedSource] = useState("Screen");
-  const [hasSelectedSource, setHasSelectedSource] = useState(false);
 
-  // Camera control functions
-  const toggleCamera = () => {
-    setCameraSettings(prev => ({ ...prev, enabled: !prev.enabled }));
-  };
-
-  const handleShapeChange = (shape: CameraShape) => {
-    setCameraSettings(prev => ({ ...prev, shape }));
-  };
-
-  const handleBorderStyleChange = (borderStyle: CameraBorderStyle) => {
-    setCameraSettings(prev => ({ ...prev, borderStyle }));
-  };
-
-  const handleShadowIntensityChange = (value: number[]) => {
-    setCameraSettings(prev => ({ ...prev, shadowIntensity: value[0] }));
-  };
-
-  const handleSizeChange = (value: number[]) => {
-    setCameraSettings(prev => ({ ...prev, size: value[0] }));
-  };
-
-  const handlePositionChange = (position: CameraPosition) => {
-    setCameraSettings(prev => ({ ...prev, position }));
-  };
-
-  const handleCameraDeviceChange = (deviceId: string) => {
-    setCameraSettings(prev => ({ ...prev, deviceId }));
-  };
-
-  // Microphone control functions
-  const toggleMicrophone = () => {
-    setMicrophoneSettings(prev => ({ ...prev, enabled: !prev.enabled }));
-  };
-
-  const handleMicDeviceChange = (deviceId: string) => {
-    setMicrophoneSettings(prev => ({ ...prev, deviceId }));
-  };
-
-  useEffect(() => {
-    const checkSelectedSource = async () => {
-      if (window.electronAPI) {
-        const source = await window.electronAPI.getSelectedSource();
-        if (source) {
-          setSelectedSource(source.name);
-          setHasSelectedSource(true);
-        } else {
-          setSelectedSource("Screen");
-          setHasSelectedSource(false);
-        }
+  // Handlers
+  const toggleCamera = () => setCameraSettings(prev => ({ ...prev, enabled: !prev.enabled }));
+  const toggleMicrophone = () => setMicrophoneSettings(prev => ({ ...prev, enabled: !prev.enabled }));
+  const toggleSystemAudio = () => setSystemAudioSettings(prev => ({ ...prev, enabled: !prev.enabled }));
+  
+  const handleModeSelect = async (mode: RecordingMode) => {
+    setSelectedMode(mode);
+    if (mode === 'fullscreen') {
+      const sources = await window.electronAPI?.getSources({ types: ['screen'] });
+      if (sources && sources.length > 0) await window.electronAPI?.selectSource(sources[0]);
+    } else if (mode === 'window') {
+      // 打开全屏窗口选择器
+      // @ts-ignore
+      const windowInfo = await window.electronAPI?.openWindowPicker?.();
+      if (windowInfo) {
+        const windowSource = {
+          id: windowInfo.id,
+          name: windowInfo.name,
+          display_id: '',
+          thumbnail: null,
+          appIcon: null,
+        };
+        await window.electronAPI?.selectSource(windowSource);
       }
-    };
-
-    checkSelectedSource();
-    
-    const interval = setInterval(checkSelectedSource, 500);
-    return () => clearInterval(interval);
-  }, []);
-
-  const openSourceSelector = () => {
-    if (window.electronAPI) {
-      window.electronAPI.openSourceSelector();
+    } else if (mode === 'region') {
+      // 直接打开区域选择器进行框选，不显示菜单
+      const region = await window.electronAPI?.openRegionSelector?.();
+      if (region) {
+        // 设置区域 source，格式：region:x,y,width,height
+        const regionSource = {
+          id: `region:${region.x},${region.y},${region.width},${region.height}`,
+          name: `区域 ${region.width}×${region.height}`,
+          display_id: '',
+          thumbnail: null,
+          appIcon: null,
+        };
+        await window.electronAPI?.selectSource(regionSource);
+      }
     }
+  };
+
+  const handleStartRecording = async () => {
+    if (selectedMode === 'fullscreen') {
+      const sources = await window.electronAPI?.getSources({ types: ['screen'] });
+      if (sources && sources.length > 0) await window.electronAPI?.selectSource(sources[0]);
+    }
+    toggleRecording();
   };
 
   const openVideoFile = async () => {
     const result = await window.electronAPI.openVideoFilePicker();
-    
-    if (result.cancelled) {
-      return;
-    }
-    
     if (result.success && result.path) {
       await window.electronAPI.setCurrentVideoPath(result.path);
       await window.electronAPI.switchToEditor();
     }
   };
 
-  // IPC events for hide/close
-  const sendHudOverlayHide = () => {
-    if (window.electronAPI && window.electronAPI.hudOverlayHide) {
-      window.electronAPI.hudOverlayHide();
-    }
-  };
-  const sendHudOverlayClose = () => {
-    if (window.electronAPI && window.electronAPI.hudOverlayClose) {
-      window.electronAPI.hudOverlayClose();
-    }
-  };
+  const recordingModes = [
+    { id: 'fullscreen' as RecordingMode, label: '全屏', icon: MdMonitor },
+    { id: 'region' as RecordingMode, label: '自定义区域', icon: MdCropFree },
+    { id: 'window' as RecordingMode, label: '窗口', icon: MdWindow },
+  ];
+
+  const selectedCameraLabel = availableCameras.find(c => c.deviceId === cameraSettings.deviceId)?.label || '选择摄像头';
+  const selectedMicLabel = availableMicrophones.find(m => m.deviceId === microphoneSettings.deviceId)?.label || '选择麦克风';
+
+  // Mouse event handling for transparent window
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      // Check if mouse is over any interactive element
+      const target = e.target as HTMLElement;
+      
+      // Elements that should capture mouse events:
+      // 1. The main UI card (with glassContainer class)
+      // 2. Popover content (usually portalled to body)
+      // 3. Buttons, inputs, etc.
+      
+      // Use data attribute for more robust selection
+      const mainUI = document.querySelector('[data-main-ui="true"]');
+      const isOverMainUI = mainUI && (mainUI === target || mainUI.contains(target));
+      // 检测 Popover 内容（使用 data-popover 或 role="dialog"）
+      const isOverPopover = target.closest('[data-popover="true"]') || target.closest('[role="dialog"]');
+      
+      if (isOverMainUI || isOverPopover) {
+        window.electronAPI?.setIgnoreMouseEvents?.(false);
+      } else {
+        window.electronAPI?.setIgnoreMouseEvents?.(true, { forward: true });
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
 
   return (
-    <div className="w-full h-screen relative bg-transparent">
-      <div
-        className={`absolute bottom-2 left-1/2 -translate-x-1/2 w-full max-w-[500px] flex items-center justify-between px-4 py-2 ${styles.electronDrag}`}
-        style={{
-          borderRadius: 16,
-          background: 'linear-gradient(135deg, rgba(30,30,40,0.92) 0%, rgba(20,20,30,0.85) 100%)',
-          backdropFilter: 'blur(32px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(32px) saturate(180%)',
-          boxShadow: '0 4px 24px 0 rgba(0,0,0,0.28), 0 1px 3px 0 rgba(0,0,0,0.14) inset',
-          border: '1px solid rgba(80,80,120,0.22)',
-          minHeight: 44,
-        }}
-      >
-        <div className={`flex items-center gap-1 ${styles.electronDrag}`}> <RxDragHandleDots2 size={18} className="text-white/40" /> </div>
-
-        <Button
-          variant="link"
-          size="sm"
-          className={`gap-1 text-white bg-transparent hover:bg-transparent px-0 flex-1 text-left text-xs ${styles.electronNoDrag}`}
-          onClick={openSourceSelector}
-          disabled={recording}
-        >
-          <MdMonitor size={14} className="text-white" />
-          <ContentClamp truncateLength={6}>{selectedSource}</ContentClamp>
-        </Button>
-
-        <div className="w-px h-6 bg-white/30" />
-
-        {/* Camera Toggle and Settings */}
-        <div className={`flex items-center gap-1 ${styles.electronNoDrag}`}>
-          <Button
-            variant="link"
-            size="sm"
-            onClick={toggleCamera}
-            disabled={recording || availableCameras.length === 0}
-            className={`gap-1 text-white bg-transparent hover:bg-transparent px-1 text-xs`}
-            title={cameraSettings.enabled ? "关闭摄像头" : "开启摄像头"}
-          >
-            {cameraSettings.enabled ? (
-              <BsCameraVideo size={14} className="text-green-400" />
-            ) : (
-              <BsCameraVideoOff size={14} className="text-white/50" />
-            )}
-          </Button>
-          
-          <Popover open={showCameraSettings} onOpenChange={setShowCameraSettings}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="link"
-                size="sm"
-                disabled={recording}
-                className={`text-white bg-transparent hover:bg-transparent px-1 text-xs`}
-                title="摄像头设置"
-              >
-                <IoSettingsOutline size={12} className="text-white/70" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent 
-              className="w-72 bg-zinc-900/95 border-zinc-700 text-white p-3 z-[9999]"
-              side="top"
-              align="center"
-            >
-              <div className="space-y-4">
-                <h4 className="text-xs font-medium text-zinc-300">摄像头设置</h4>
-                
-                {/* Camera Preview */}
-                {cameraSettings.enabled && cameraPreviewStream && (
-                  <div className="relative w-full aspect-video bg-zinc-800 rounded-lg overflow-hidden">
-                    <video
-                      ref={cameraPreviewRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      className="w-full h-full object-cover"
-                      style={{ transform: 'scaleX(-1)' }}
-                    />
-                    <div 
-                      className="absolute border-2 border-dashed border-green-400/60"
-                      style={{
-                        ...(cameraSettings.position === 'top-left' && { top: 8, left: 8 }),
-                        ...(cameraSettings.position === 'top-right' && { top: 8, right: 8 }),
-                        ...(cameraSettings.position === 'bottom-left' && { bottom: 8, left: 8 }),
-                        ...(cameraSettings.position === 'bottom-right' && { bottom: 8, right: 8 }),
-                        width: `${cameraSettings.size * 2}%`,
-                        height: `${cameraSettings.size * 2}%`,
-                        borderRadius: cameraSettings.shape === 'circle' ? '50%' : '8px',
-                      }}
-                    />
-                  </div>
-                )}
-
-                {/* Camera Device Selection */}
-                {availableCameras.length > 0 && (
-                  <div className="space-y-2">
-                    <label className="text-xs text-zinc-400">摄像头</label>
-                    <select
-                      value={cameraSettings.deviceId || ''}
-                      onChange={(e) => handleCameraDeviceChange(e.target.value)}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white"
-                    >
-                      {availableCameras.map(camera => (
-                        <option key={camera.deviceId} value={camera.deviceId}>
-                          {camera.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                
-                {/* Shape Selection */}
-                <div className="space-y-2">
-                  <label className="text-xs text-zinc-400">形状</label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleShapeChange('circle')}
-                      className={`flex-1 py-2 px-3 rounded text-xs flex items-center justify-center gap-2 ${
-                        cameraSettings.shape === 'circle' 
-                          ? 'bg-green-600 text-white' 
-                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                      }`}
-                    >
-                      <div className="w-4 h-4 border-2 rounded-full" />
-                      圆形
-                    </button>
-                    <button
-                      onClick={() => handleShapeChange('rectangle')}
-                      className={`flex-1 py-2 px-3 rounded text-xs flex items-center justify-center gap-2 ${
-                        cameraSettings.shape === 'rectangle' 
-                          ? 'bg-green-600 text-white' 
-                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                      }`}
-                    >
-                      <div className="w-5 h-3 border-2 rounded" />
-                      矩形
-                    </button>
-                  </div>
-                </div>
-
-                {/* Border Style Selection */}
-                <div className="space-y-2">
-                  <label className="text-xs text-zinc-400">边框样式</label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleBorderStyleChange('shadow')}
-                      className={`flex-1 py-2 px-3 rounded text-xs flex items-center justify-center gap-2 ${
-                        cameraSettings.borderStyle === 'shadow' 
-                          ? 'bg-green-600 text-white' 
-                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                      }`}
-                    >
-                      <div className="w-4 h-4 rounded-full bg-zinc-600" style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.3)' }} />
-                      阴影
-                    </button>
-                    <button
-                      onClick={() => handleBorderStyleChange('white')}
-                      className={`flex-1 py-2 px-3 rounded text-xs flex items-center justify-center gap-2 ${
-                        cameraSettings.borderStyle === 'white' 
-                          ? 'bg-green-600 text-white' 
-                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                      }`}
-                    >
-                      <div className="w-4 h-4 rounded-full border-2 border-white bg-zinc-600" />
-                      白框
-                    </button>
-                  </div>
-                </div>
-
-                {/* Shadow Intensity Slider (only show when shadow style is selected) */}
-                {cameraSettings.borderStyle === 'shadow' && (
-                  <div className="space-y-2">
-                    <label className="text-xs text-zinc-400">阴影强度: {cameraSettings.shadowIntensity}%</label>
-                    <Slider
-                      value={[cameraSettings.shadowIntensity]}
-                      onValueChange={handleShadowIntensityChange}
-                      min={0}
-                      max={100}
-                      step={5}
-                      className="w-full"
-                    />
-                  </div>
-                )}
-
-                {/* Size Slider */}
-                <div className="space-y-2">
-                  <label className="text-xs text-zinc-400">大小: {cameraSettings.size}%</label>
-                  <Slider
-                    value={[cameraSettings.size]}
-                    onValueChange={handleSizeChange}
-                    min={5}
-                    max={30}
-                    step={1}
-                    className="w-full"
-                  />
-                </div>
-
-                {/* Position Selection */}
-                <div className="space-y-2">
-                  <label className="text-xs text-zinc-400">位置</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { value: 'top-left', label: '左上' },
-                      { value: 'top-right', label: '右上' },
-                      { value: 'bottom-left', label: '左下' },
-                      { value: 'bottom-right', label: '右下' },
-                    ].map(pos => (
-                      <button
-                        key={pos.value}
-                        onClick={() => handlePositionChange(pos.value as CameraPosition)}
-                        className={`py-1.5 px-2 rounded text-xs ${
-                          cameraSettings.position === pos.value 
-                            ? 'bg-green-600 text-white' 
-                            : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                        }`}
-                      >
-                        {pos.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {availableCameras.length === 0 && (
-                  <div className="text-xs text-zinc-500 text-center py-2">
-                    未检测到摄像头
-                    <button
-                      onClick={refreshCameras}
-                      className="block mx-auto mt-2 text-green-400 hover:underline"
-                    >
-                      刷新
-                    </button>
-                  </div>
-                )}
+    <div className="w-full h-full flex flex-col justify-end select-none font-sans">
+      {/* Main UI Card - macOS Glass Style */}
+      <div data-main-ui="true" className={`w-full text-white flex flex-col h-[400px] rounded-t-2xl overflow-hidden ${styles.glassContainer}`}>
+        {/* Title Bar */}
+        <div className={`h-12 flex items-center justify-between px-5 flex-shrink-0 ${styles.electronDrag} ${styles.titleBar}`}>
+          <div className="flex items-center gap-5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-[10px] bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                <div className="w-2.5 h-2.5 bg-white rounded-full" />
               </div>
-            </PopoverContent>
-          </Popover>
+              <span className="text-[14px] font-semibold text-white/90 tracking-tight">InsightView</span>
+            </div>
+            <div className={`h-4 w-px ${styles.divider}`} />
+            <button 
+              onClick={openVideoFile}
+              className={`text-[13px] text-white/50 hover:text-white/90 flex items-center gap-2 transition-all duration-200 ${styles.electronNoDrag} px-3 py-1.5 rounded-lg hover:bg-white/8`}
+            >
+              <FiFolder size={14} />
+              文件
+            </button>
+          </div>
+          <div className={`flex items-center gap-1 ${styles.electronNoDrag}`}>
+            <button onClick={() => window.electronAPI?.hudOverlayHide?.()} className="w-8 h-8 flex items-center justify-center hover:bg-white/8 rounded-lg transition-all duration-200 group">
+              <FiMinus size={15} className="text-white/40 group-hover:text-white/80" />
+            </button>
+            <button onClick={() => window.electronAPI?.hudOverlayClose?.()} className="w-8 h-8 flex items-center justify-center hover:bg-red-500/15 rounded-lg transition-all duration-200 group">
+              <FiX size={15} className="text-white/40 group-hover:text-red-400" />
+            </button>
+          </div>
         </div>
 
-        {/* Microphone Toggle and Settings */}
-        <div className={`flex items-center gap-0.5 ${styles.electronNoDrag}`}>
-          <Button
-            variant="link"
-            size="sm"
-            onClick={toggleMicrophone}
-            disabled={recording || availableMicrophones.length === 0}
-            className={`text-white bg-transparent hover:bg-transparent px-1 text-xs`}
-            title={microphoneSettings.enabled ? "关闭麦克风" : "开启麦克风"}
-          >
-            {microphoneSettings.enabled ? (
-              <BsMic size={14} className="text-green-400" />
-            ) : (
-              <BsMicMute size={14} className="text-white/50" />
-            )}
-          </Button>
+        {/* Main Content */}
+        <div className={`flex-1 flex px-5 py-5 gap-6 min-h-0 ${styles.macScrollbar}`}>
           
-          <Popover open={showMicSettings} onOpenChange={setShowMicSettings}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="link"
-                size="sm"
-                disabled={recording}
-                className={`text-white bg-transparent hover:bg-transparent px-0.5 text-xs`}
-                title="麦克风设置"
+          {/* Left Section: Modes */}
+          <div className="flex-1 flex flex-col min-w-0">
+            <h2 className="text-[12px] text-white/35 mb-4 font-medium tracking-wide uppercase">录制方式</h2>
+            
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              {recordingModes.map((mode) => {
+                const isSelected = selectedMode === mode.id;
+                const Icon = mode.icon;
+                return (
+                  <button
+                    key={mode.id}
+                    onClick={() => handleModeSelect(mode.id)}
+                    disabled={recording}
+                    className={`
+                      group relative flex flex-col items-center p-0 rounded-xl overflow-hidden transition-all duration-200
+                      ${isSelected 
+                        ? styles.glassCardSelected
+                        : styles.glassCard
+                      }
+                      ${recording ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                    `}
+                  >
+                    {/* Preview Area */}
+                    <div className={`
+                      w-full aspect-[16/10] flex items-center justify-center
+                      ${isSelected 
+                        ? 'bg-gradient-to-b from-emerald-500/8 to-transparent' 
+                        : 'bg-gradient-to-b from-white/3 to-transparent'
+                      }
+                    `}>
+                      <Icon size={28} className={`transition-all duration-200 ${isSelected ? 'text-emerald-400' : 'text-white/25 group-hover:text-white/45'}`} />
+                      {mode.id === 'region' && (
+                        <div className={`absolute inset-x-8 inset-y-6 border-2 border-dashed rounded-lg transition-colors duration-200 ${isSelected ? 'border-emerald-500/25' : 'border-white/8'}`} />
+                      )}
+                    </div>
+                    
+                    {/* Label */}
+                    <div className="w-full py-3 flex flex-col items-center justify-center border-t border-white/5">
+                      <span className={`text-[12px] font-medium transition-colors duration-200 ${isSelected ? 'text-white' : 'text-white/45 group-hover:text-white/65'}`}>
+                        {mode.label}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Start Button (Bottom of Left) */}
+            <div className="mt-auto">
+              <button
+                onClick={recording ? toggleRecording : handleStartRecording}
+                className={`
+                  w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-semibold text-[14px]
+                  transition-all duration-200 
+                  ${recording 
+                    ? 'bg-red-500/90 hover:bg-red-500 text-white shadow-lg shadow-red-500/25' 
+                    : 'bg-emerald-500/90 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/25'
+                  }
+                `}
               >
-                <IoSettingsOutline size={10} className="text-white/70" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent 
-              className="w-64 bg-zinc-900/95 border-zinc-700 text-white p-3 z-[9999]"
-              side="top"
-              align="center"
-            >
-              <div className="space-y-3">
-                <h4 className="text-xs font-medium text-zinc-300">麦克风设置</h4>
+                {recording ? (
+                  <>
+                    <FaRegStopCircle size={16} />
+                    <span>停止录制 ({formatTime(elapsed)})</span>
+                  </>
+                ) : (
+                  <>
+                    <BsRecordCircle size={16} />
+                    <span>开始录制</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Right Section: Devices & Tools */}
+          <div className="w-[280px] flex flex-col flex-shrink-0 border-l border-white/[0.06] pl-6">
+            <h2 className="text-[12px] text-white/35 mb-4 font-medium tracking-wide uppercase">设备 & 工具</h2>
+            
+            <div className={`flex flex-col gap-3 flex-1 overflow-y-auto ${styles.macScrollbar}`}>
+              
+              {/* Camera Row */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={toggleCamera}
+                  className={`
+                    w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 flex-shrink-0
+                    ${cameraSettings.enabled 
+                      ? 'bg-emerald-500/90 text-white shadow-md shadow-emerald-500/20' 
+                      : `${styles.glassCard} text-white/35 hover:text-white/55`
+                    }
+                  `}
+                >
+                  <FiMonitor size={16} />
+                </button>
                 
-                {/* Microphone Device Selection */}
-                {availableMicrophones.length > 0 && (
-                  <div className="space-y-2">
-                    <label className="text-xs text-zinc-400">选择麦克风</label>
-                    <select
-                      value={microphoneSettings.deviceId || ''}
-                      onChange={(e) => handleMicDeviceChange(e.target.value)}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-white"
-                    >
-                      {availableMicrophones.map(mic => (
-                        <option key={mic.deviceId} value={mic.deviceId}>
-                          {mic.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {availableMicrophones.length === 0 && (
-                  <div className="text-xs text-zinc-500 text-center py-2">
-                    未检测到麦克风
-                    <button
-                      onClick={refreshMicrophones}
-                      className="block mx-auto mt-2 text-green-400 hover:underline"
-                    >
-                      刷新
+                <Popover open={showCameraSettings} onOpenChange={setShowCameraSettings}>
+                  <PopoverTrigger asChild>
+                    <button className={`flex-1 h-10 px-3.5 rounded-xl flex items-center justify-between transition-all duration-200 group ${styles.glassCard}`}>
+                      <span className={`text-[12px] truncate max-w-[130px] transition-colors ${cameraSettings.enabled ? 'text-white/80' : 'text-white/40'}`}>
+                        {cameraSettings.enabled ? selectedCameraLabel : '摄像头已关闭'}
+                      </span>
+                      <FiChevronDown size={14} className="text-white/25 group-hover:text-white/45 transition-colors" />
                     </button>
-                  </div>
-                )}
+                  </PopoverTrigger>
+                  <PopoverContent className={`w-[260px] text-white p-4 rounded-2xl ${styles.glassPopover}`} side="top" align="end" sideOffset={8}>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-[11px] font-semibold text-white/50 uppercase tracking-wider">摄像头设置</h4>
+                        {availableCameras.length === 0 && (
+                          <button onClick={refreshCameras} className="text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors">刷新</button>
+                        )}
+                      </div>
+                      
+                      {cameraSettings.enabled && cameraPreviewStream && (
+                        <div className="relative w-full aspect-video bg-black/40 rounded-lg overflow-hidden ring-1 ring-white/10 hidden">
+                          <video ref={cameraPreviewRef} autoPlay muted playsInline className="w-full h-full object-cover transform -scale-x-100" />
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <label className="text-[11px] text-white/45 font-medium">设备</label>
+                        <select
+                          value={cameraSettings.deviceId || ''}
+                          onChange={(e) => setCameraSettings(prev => ({ ...prev, deviceId: e.target.value }))}
+                          className={`w-full rounded-xl px-3 py-2.5 text-[12px] text-white ${styles.glassInput}`}
+                        >
+                          {availableCameras.map(c => <option key={c.deviceId} value={c.deviceId}>{c.label}</option>)}
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[11px] text-white/45 font-medium">形状</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button onClick={() => setCameraSettings(p => ({...p, shape: 'circle'}))} className={`py-2.5 text-[11px] rounded-xl transition-all ${cameraSettings.shape === 'circle' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : `${styles.glassCard} text-white/50`}`}>圆形</button>
+                          <button onClick={() => setCameraSettings(p => ({...p, shape: 'rectangle'}))} className={`py-2.5 text-[11px] rounded-xl transition-all ${cameraSettings.shape === 'rectangle' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : `${styles.glassCard} text-white/50`}`}>矩形</button>
+                        </div>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
-            </PopoverContent>
-          </Popover>
+
+              {/* Microphone Row */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={toggleMicrophone}
+                  className={`
+                    w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 flex-shrink-0
+                    ${microphoneSettings.enabled 
+                      ? 'bg-emerald-500/90 text-white shadow-md shadow-emerald-500/20' 
+                      : `${styles.glassCard} text-white/35 hover:text-white/55`
+                    }
+                  `}
+                >
+                  <FiMic size={16} />
+                </button>
+                
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button className={`flex-1 h-10 px-3.5 rounded-xl flex items-center justify-between transition-all duration-200 group ${styles.glassCard}`}>
+                      <span className={`text-[12px] truncate max-w-[130px] transition-colors ${microphoneSettings.enabled ? 'text-white/80' : 'text-white/40'}`}>
+                        {microphoneSettings.enabled ? selectedMicLabel : '麦克风已关闭'}
+                      </span>
+                      <FiChevronDown size={14} className="text-white/25 group-hover:text-white/45 transition-colors" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className={`w-[260px] text-white p-4 rounded-2xl ${styles.glassPopover}`} side="top" align="end" sideOffset={8}>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-[11px] font-semibold text-white/50 uppercase tracking-wider">麦克风设置</h4>
+                        {availableMicrophones.length === 0 && (
+                          <button onClick={refreshMicrophones} className="text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors">刷新</button>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[11px] text-white/45 font-medium">设备</label>
+                        <select
+                          value={microphoneSettings.deviceId || ''}
+                          onChange={(e) => setMicrophoneSettings(prev => ({ ...prev, deviceId: e.target.value }))}
+                          className={`w-full rounded-xl px-3 py-2.5 text-[12px] text-white ${styles.glassInput}`}
+                        >
+                          {availableMicrophones.map(m => <option key={m.deviceId} value={m.deviceId}>{m.label}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* System Audio Row */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={toggleSystemAudio}
+                  className={`
+                    w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 flex-shrink-0
+                    ${systemAudioSettings.enabled 
+                      ? 'bg-emerald-500/90 text-white shadow-md shadow-emerald-500/20' 
+                      : `${styles.glassCard} text-white/35 hover:text-white/55`
+                    }
+                  `}
+                >
+                  <FiVolume2 size={16} />
+                </button>
+                
+                <Popover open={showSystemAudioSettings} onOpenChange={setShowSystemAudioSettings}>
+                  <PopoverTrigger asChild>
+                    <button className={`flex-1 h-10 px-3.5 rounded-xl flex items-center justify-between transition-all duration-200 group ${styles.glassCard}`}>
+                      <span className={`text-[12px] truncate max-w-[130px] transition-colors ${systemAudioSettings.enabled ? 'text-white/80' : 'text-white/40'}`}>
+                        {systemAudioSettings.enabled ? `系统声音 (${systemAudioSettings.volume}%)` : '系统声音已关闭'}
+                      </span>
+                      <FiChevronDown size={14} className="text-white/25 group-hover:text-white/45 transition-colors" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className={`w-[260px] text-white p-4 rounded-2xl ${styles.glassPopover}`} side="top" align="end" sideOffset={8}>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-[11px] font-semibold text-white/50 uppercase tracking-wider">系统声音设置</h4>
+                      </div>
+                      
+                      <div className="space-y-2.5">
+                        <label className="text-[11px] text-white/45 font-medium">音量</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={systemAudioSettings.volume}
+                            onChange={(e) => setSystemAudioSettings(prev => ({ ...prev, volume: parseInt(e.target.value) }))}
+                            className="flex-1 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-emerald-500"
+                          />
+                          <span className="text-[11px] text-white/50 w-9 text-right">{systemAudioSettings.volume}%</span>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-white/8">
+                        <p className="text-[10px] text-white/35 leading-relaxed">
+                          录制电脑播放的所有声音（如视频、音乐、系统提示音等）。
+                        </p>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Teleprompter Button */}
+              <div className="mt-auto pt-3 border-t border-white/[0.06]">
+                <button className={`w-full h-10 rounded-xl flex items-center justify-center gap-2 text-[12px] text-white/50 hover:text-white/70 transition-all duration-200 group ${styles.glassCard}`}>
+                  <FiFileText size={14} className="text-white/35 group-hover:text-white/55" />
+                  提词器
+                </button>
+              </div>
+
+            </div>
+          </div>
         </div>
-
-        <div className="w-px h-6 bg-white/30" />
-
-        <Button
-          variant="link"
-          size="sm"
-          onClick={hasSelectedSource ? toggleRecording : openSourceSelector}
-          disabled={!hasSelectedSource && !recording}
-          className={`gap-1 text-white bg-transparent hover:bg-transparent px-0 flex-1 text-center text-xs ${styles.electronNoDrag}`}
-        >
-          {recording ? (
-            <>
-              <FaRegStopCircle size={14} className="text-red-400" />
-              <span className="text-red-400">{formatTime(elapsed)}</span>
-            </>
-          ) : (
-            <>
-              <BsRecordCircle size={14} className={hasSelectedSource ? "text-white" : "text-white/50"} />
-              <span className={hasSelectedSource ? "text-white" : "text-white/50"}>Record</span>
-            </>
-          )}
-        </Button>
-        
-
-        <div className="w-px h-6 bg-white/30" />
-
-
-        <Button
-          variant="link"
-          size="sm"
-          onClick={openVideoFile}
-          className={`gap-1 text-white bg-transparent hover:bg-transparent px-0 flex-1 text-right text-xs ${styles.electronNoDrag} ${styles.folderButton}`}
-          disabled={recording}
-        >
-          <FaFolderMinus size={14} className="text-white" />
-          <span className={styles.folderText}>Open</span>
-        </Button>
-
-         {/* Separator before hide/close buttons */}
-        <div className="w-px h-6 bg-white/30 mx-2" />
-        <Button
-          variant="link"
-          size="icon"
-          className={`ml-2 ${styles.electronNoDrag} hudOverlayButton`}
-          title="Hide HUD"
-          onClick={sendHudOverlayHide}
-        >
-          <FiMinus size={18} style={{ color: '#fff', opacity: 0.7 }} />
-          
-        </Button>
-
-        <Button
-          variant="link"
-          size="icon"
-          className={`ml-1 ${styles.electronNoDrag} hudOverlayButton`}
-          title="Close App"
-          onClick={sendHudOverlayClose}
-        >
-          <FiX size={18} style={{ color: '#fff', opacity: 0.7 }} />
-        </Button>
       </div>
     </div>
   );

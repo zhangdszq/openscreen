@@ -6,7 +6,144 @@
   -webkit-app-region: no-drag;
 }
 
+/* macOS 风格毛玻璃主容器 */
+.glassContainer {
+  background: rgba(20, 20, 22, 0.92);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 
+    0 25px 50px -12px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.08) inset;
+}
 
+/* macOS 风格毛玻璃弹出菜单 */
+.glassPopover {
+  background: rgba(28, 28, 30, 0.95) !important;
+  backdrop-filter: blur(50px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(50px) saturate(200%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 
+    0 20px 40px -8px rgba(0, 0, 0, 0.5),
+    0 8px 16px -4px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.1) inset !important;
+}
+
+/* macOS 风格毛玻璃卡片 */
+.glassCard {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glassCard:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.glassCardSelected {
+  background: rgba(52, 178, 123, 0.12);
+  border-color: rgba(52, 178, 123, 0.4);
+  box-shadow: 
+    0 0 0 1px rgba(52, 178, 123, 0.2),
+    0 8px 24px -4px rgba(52, 178, 123, 0.15);
+}
+
+/* macOS 风格按钮 */
+.glassButton {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glassButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.glassButton:active {
+  transform: translateY(0);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* macOS 风格滚动条 */
+.macScrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.macScrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.macScrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.macScrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.macScrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.macScrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 标题栏样式 */
+.titleBar {
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 分隔线 */
+.divider {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 输入框和选择框样式 */
+.glassInput {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.glassInput:focus {
+  border-color: rgba(52, 178, 123, 0.5);
+  box-shadow: 0 0 0 3px rgba(52, 178, 123, 0.12);
+  outline: none;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.glassInput:hover:not(:focus) {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* 选择框下拉箭头 */
+.glassInput option {
+  background: rgb(28, 28, 30);
+  color: white;
+  padding: 8px 12px;
+}
+
+/* 旧样式保留兼容 */
 .folderButton {
   cursor: pointer;
   display: flex;
@@ -31,6 +168,7 @@
   opacity: 0.7;
   transition: opacity 0.15s;
 }
+
 .hudOverlayButton:hover {
   opacity: 0.7;
   background: none !important;

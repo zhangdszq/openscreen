@@ -2,7 +2,211 @@ import { ipcMain, screen, BrowserWindow, systemPreferences, dialog, desktopCaptu
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { createRequire } from "node:module";
+import { createRequire } from "module";
+import { createRequire as createRequire$1 } from "node:module";
+const require$1 = createRequire(import.meta.url);
+const isWindows = process.platform === "win32";
+let initialized = false;
+let initError = null;
+let koffi = null;
+let user32 = null;
+let dwmapi = null;
+let POINT = null;
+let RECT = null;
+let GetCursorPos = null;
+let WindowFromPoint = null;
+let GetWindowRect = null;
+let GetWindowTextW = null;
+let GetWindowTextLengthW = null;
+let IsWindowVisible = null;
+let GetAncestor = null;
+let GetClassNameW = null;
+let DwmGetWindowAttribute = null;
+const GA_ROOTOWNER = 3;
+const DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+function initialize() {
+  if (initialized) return !!user32;
+  initialized = true;
+  if (!isWindows) {
+    initError = "Not Windows platform";
+    console.log("[WindowDetector] Not Windows platform, skipping initialization");
+    return false;
+  }
+  try {
+    koffi = require$1("koffi");
+    console.log("[WindowDetector] koffi loaded successfully");
+  } catch (error) {
+    initError = `Failed to load koffi: ${error}`;
+    console.error("[WindowDetector]", initError);
+    return false;
+  }
+  try {
+    user32 = koffi.load("user32.dll");
+    console.log("[WindowDetector] user32.dll loaded");
+  } catch (error) {
+    initError = `Failed to load user32.dll: ${error}`;
+    console.error("[WindowDetector]", initError);
+    return false;
+  }
+  try {
+    dwmapi = koffi.load("dwmapi.dll");
+    console.log("[WindowDetector] dwmapi.dll loaded");
+  } catch (error) {
+    console.warn("[WindowDetector] dwmapi.dll not available:", error);
+  }
+  try {
+    POINT = koffi.struct("POINT", {
+      x: "long",
+      y: "long"
+    });
+    RECT = koffi.struct("RECT", {
+      left: "long",
+      top: "long",
+      right: "long",
+      bottom: "long"
+    });
+    GetCursorPos = user32.func("bool GetCursorPos(_Out_ POINT *lpPoint)");
+    WindowFromPoint = user32.func("void* WindowFromPoint(POINT Point)");
+    GetWindowRect = user32.func("bool GetWindowRect(void *hWnd, _Out_ RECT *lpRect)");
+    GetWindowTextLengthW = user32.func("int GetWindowTextLengthW(void *hWnd)");
+    GetWindowTextW = user32.func("int GetWindowTextW(void *hWnd, _Out_ uint16 *lpString, int nMaxCount)");
+    IsWindowVisible = user32.func("bool IsWindowVisible(void *hWnd)");
+    GetAncestor = user32.func("void* GetAncestor(void *hwnd, unsigned int gaFlags)");
+    GetClassNameW = user32.func("int GetClassNameW(void *hWnd, _Out_ uint16 *lpClassName, int nMaxCount)");
+    if (dwmapi) {
+      DwmGetWindowAttribute = dwmapi.func("long DwmGetWindowAttribute(void *hwnd, unsigned int dwAttribute, _Out_ RECT *pvAttribute, unsigned int cbAttribute)");
+    }
+    console.log("[WindowDetector] All functions defined successfully");
+    return true;
+  } catch (error) {
+    initError = `Failed to define functions: ${error}`;
+    console.error("[WindowDetector]", initError);
+    return false;
+  }
+}
+function getCursorPosition() {
+  if (!initialize() || !GetCursorPos) return null;
+  try {
+    const point = { x: 0, y: 0 };
+    if (GetCursorPos(point)) {
+      return { x: point.x, y: point.y };
+    }
+  } catch (error) {
+    console.warn("[WindowDetector] GetCursorPos failed:", error);
+  }
+  return null;
+}
+function getWindowText(hwnd) {
+  if (!GetWindowTextLengthW || !GetWindowTextW) return "";
+  try {
+    const length = GetWindowTextLengthW(hwnd);
+    if (length > 0) {
+      const buffer = new Uint16Array(length + 1);
+      GetWindowTextW(hwnd, buffer, length + 1);
+      let result = "";
+      for (let i = 0; i < length; i++) {
+        if (buffer[i] === 0) break;
+        result += String.fromCharCode(buffer[i]);
+      }
+      return result;
+    }
+  } catch (error) {
+    console.warn("[WindowDetector] GetWindowText failed:", error);
+  }
+  return "";
+}
+function getWindowClassName(hwnd) {
+  if (!GetClassNameW) return "";
+  try {
+    const buffer = new Uint16Array(256);
+    const len = GetClassNameW(hwnd, buffer, 256);
+    if (len > 0) {
+      let result = "";
+      for (let i = 0; i < len; i++) {
+        if (buffer[i] === 0) break;
+        result += String.fromCharCode(buffer[i]);
+      }
+      return result;
+    }
+  } catch (error) {
+    console.warn("[WindowDetector] GetClassName failed:", error);
+  }
+  return "";
+}
+function getWindowAtPoint(x, y) {
+  if (!initialize() || !WindowFromPoint) return null;
+  try {
+    const point = { x, y };
+    let hwnd = WindowFromPoint(point);
+    if (!hwnd) return null;
+    if (GetAncestor) {
+      const rootHwnd = GetAncestor(hwnd, GA_ROOTOWNER);
+      if (rootHwnd) {
+        hwnd = rootHwnd;
+      }
+    }
+    if (IsWindowVisible && !IsWindowVisible(hwnd)) {
+      return null;
+    }
+    const title = getWindowText(hwnd);
+    const className = getWindowClassName(hwnd);
+    let bounds = { x: 0, y: 0, width: 0, height: 0 };
+    if (DwmGetWindowAttribute) {
+      try {
+        const rect = { left: 0, top: 0, right: 0, bottom: 0 };
+        const result = DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, rect, 16);
+        if (result === 0) {
+          bounds = {
+            x: rect.left,
+            y: rect.top,
+            width: rect.right - rect.left,
+            height: rect.bottom - rect.top
+          };
+        }
+      } catch {
+      }
+    }
+    if (bounds.width === 0 && GetWindowRect) {
+      const rect = { left: 0, top: 0, right: 0, bottom: 0 };
+      if (GetWindowRect(hwnd, rect)) {
+        bounds = {
+          x: rect.left,
+          y: rect.top,
+          width: rect.right - rect.left,
+          height: rect.bottom - rect.top
+        };
+      }
+    }
+    if (bounds.width < 50 || bounds.height < 50) {
+      return null;
+    }
+    const systemClasses = ["Shell_TrayWnd", "Progman", "WorkerW", "DV2ControlHost"];
+    if (systemClasses.includes(className)) {
+      return null;
+    }
+    const hwndId = `${title}-${bounds.x}-${bounds.y}-${bounds.width}-${bounds.height}`;
+    return {
+      hwnd: hwndId,
+      title,
+      className,
+      bounds,
+      isVisible: true
+    };
+  } catch (error) {
+    console.warn("[WindowDetector] getWindowAtPoint failed:", error);
+    return null;
+  }
+}
+function getWindowUnderCursor() {
+  const cursor = getCursorPosition();
+  if (!cursor) return null;
+  return getWindowAtPoint(cursor.x, cursor.y);
+}
+function isWindowDetectionAvailable() {
+  const result = initialize();
+  console.log("[WindowDetector] isWindowDetectionAvailable:", result, "initError:", initError);
+  return result;
+}
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.join(__dirname$1, "..");
 const VITE_DEV_SERVER_URL$1 = process.env["VITE_DEV_SERVER_URL"];
@@ -12,6 +216,8 @@ let cameraPreviewWindow = null;
 let regionSelectorWindow = null;
 let regionIndicatorWindow = null;
 let regionSelectionResolve = null;
+let windowPickerWindow = null;
+let windowPickerResolve = null;
 ipcMain.on("hud-overlay-hide", () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
     hudOverlayWindow.minimize();
@@ -82,6 +288,11 @@ function closeCameraPreviewWindow() {
 function showCameraPreviewWindowIfExists() {
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
     cameraPreviewWindow.show();
+  }
+}
+function hideCameraPreviewWindow() {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.hide();
   }
 }
 ipcMain.handle("update-camera-preview", (_, options) => {
@@ -314,18 +525,18 @@ function positionCameraInArea(options) {
 function createHudOverlayWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { workArea } = primaryDisplay;
-  const windowWidth = 500;
-  const windowHeight = 400;
+  const windowWidth = 800;
+  const windowHeight = 800;
   const x = Math.floor(workArea.x + (workArea.width - windowWidth) / 2);
-  const y = Math.floor(workArea.y + workArea.height - windowHeight - 5);
+  const y = Math.floor(workArea.y + workArea.height - windowHeight);
   const isMac = process.platform === "darwin";
   const win = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
-    minWidth: 500,
-    maxWidth: 500,
+    minWidth: 800,
+    maxWidth: 800,
     minHeight: 400,
-    maxHeight: 400,
+    maxHeight: 800,
     x,
     y,
     frame: false,
@@ -341,7 +552,8 @@ function createHudOverlayWindow() {
       backgroundThrottling: false
     }
   });
-  win.setAlwaysOnTop(true, isMac ? "pop-up-menu" : "screen-saver");
+  win.setAlwaysOnTop(true, isMac ? "pop-up-menu" : "screen-saver", 0);
+  win.setIgnoreMouseEvents(true, { forward: true });
   win.setContentProtection(true);
   win.webContents.on("did-finish-load", () => {
     win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
@@ -418,6 +630,12 @@ ipcMain.handle("confirm-region-selection", (_, region) => {
     regionSelectorWindow.close();
     regionSelectorWindow = null;
   }
+  if (!regionIndicatorWindow || regionIndicatorWindow.isDestroyed()) {
+    regionIndicatorWindow = createRegionIndicatorWindow(region);
+  } else {
+    updateRegionIndicatorWindow(region);
+    regionIndicatorWindow.show();
+  }
   return { success: true };
 });
 ipcMain.handle("cancel-region-selection", () => {
@@ -431,6 +649,159 @@ ipcMain.handle("cancel-region-selection", () => {
   }
   return { success: true };
 });
+ipcMain.handle("open-window-picker", async () => {
+  return new Promise((resolve) => {
+    windowPickerResolve = resolve;
+    if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+      windowPickerWindow.focus();
+      return;
+    }
+    createWindowPickerWindow();
+  });
+});
+ipcMain.handle("confirm-window-picker", (_, windowInfo) => {
+  if (windowPickerResolve) {
+    windowPickerResolve(windowInfo);
+    windowPickerResolve = null;
+  }
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.close();
+    windowPickerWindow = null;
+  }
+  return { success: true };
+});
+ipcMain.handle("cancel-window-picker", () => {
+  if (windowPickerResolve) {
+    windowPickerResolve(null);
+    windowPickerResolve = null;
+  }
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.close();
+    windowPickerWindow = null;
+  }
+  return { success: true };
+});
+ipcMain.handle("hide-window-picker", () => {
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.hide();
+  }
+  return { success: true };
+});
+ipcMain.handle("show-window-picker", () => {
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.show();
+    windowPickerWindow.focus();
+  }
+  return { success: true };
+});
+ipcMain.handle("set-window-picker-ignore-mouse", (_, ignore) => {
+  if (windowPickerWindow && !windowPickerWindow.isDestroyed()) {
+    windowPickerWindow.setIgnoreMouseEvents(ignore, { forward: true });
+  }
+  return { success: true };
+});
+ipcMain.handle("get-active-window-source", async () => {
+  const { desktopCapturer: desktopCapturer2 } = await import("electron");
+  const sources = await desktopCapturer2.getSources({
+    types: ["window"],
+    thumbnailSize: { width: 400, height: 300 },
+    fetchWindowIcons: true
+  });
+  const filteredSources = sources.filter(
+    (s) => !s.name.includes("InsightView") && !s.name.includes("Electron") && !s.name.includes("WindowPicker") && s.name.trim() !== ""
+  );
+  if (filteredSources.length > 0) {
+    const source = filteredSources[0];
+    return {
+      id: source.id,
+      name: source.name.includes(" — ") ? source.name.split(" — ")[1] || source.name : source.name,
+      thumbnail: source.thumbnail ? source.thumbnail.toDataURL() : null,
+      appIcon: source.appIcon ? source.appIcon.toDataURL() : null
+    };
+  }
+  return null;
+});
+ipcMain.handle("is-window-detection-available", () => {
+  return isWindowDetectionAvailable();
+});
+ipcMain.handle("get-window-under-cursor", () => {
+  return getWindowUnderCursor();
+});
+ipcMain.handle("find-window-source", async (_, title) => {
+  const { desktopCapturer: desktopCapturer2 } = await import("electron");
+  const sources = await desktopCapturer2.getSources({
+    types: ["window"],
+    thumbnailSize: { width: 400, height: 300 },
+    fetchWindowIcons: true
+  });
+  let source = sources.find((s) => s.name === title || s.name.includes(title));
+  if (!source) {
+    source = sources.find(
+      (s) => s.name.toLowerCase().includes(title.toLowerCase()) || title.toLowerCase().includes(s.name.toLowerCase())
+    );
+  }
+  if (source) {
+    return {
+      id: source.id,
+      name: source.name.includes(" — ") ? source.name.split(" — ")[1] || source.name : source.name,
+      thumbnail: source.thumbnail ? source.thumbnail.toDataURL() : null,
+      appIcon: source.appIcon ? source.appIcon.toDataURL() : null
+    };
+  }
+  return null;
+});
+function createWindowPickerWindow() {
+  const displays = screen.getAllDisplays();
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const display of displays) {
+    minX = Math.min(minX, display.bounds.x);
+    minY = Math.min(minY, display.bounds.y);
+    maxX = Math.max(maxX, display.bounds.x + display.bounds.width);
+    maxY = Math.max(maxY, display.bounds.y + display.bounds.height);
+  }
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const isMac = process.platform === "darwin";
+  const win = new BrowserWindow({
+    x: minX,
+    y: minY,
+    width,
+    height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    fullscreen: false,
+    hasShadow: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname$1, "preload.mjs"),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  win.setAlwaysOnTop(true, isMac ? "pop-up-menu" : "screen-saver", 1);
+  win.setContentProtection(true);
+  if (VITE_DEV_SERVER_URL$1) {
+    win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=window-picker");
+  } else {
+    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), {
+      query: { windowType: "window-picker" }
+    });
+  }
+  windowPickerWindow = win;
+  win.on("closed", () => {
+    if (windowPickerWindow === win) {
+      windowPickerWindow = null;
+    }
+    if (windowPickerResolve) {
+      windowPickerResolve(null);
+      windowPickerResolve = null;
+    }
+  });
+  return win;
+}
 function createRegionSelectorWindow() {
   const displays = screen.getAllDisplays();
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -461,7 +832,8 @@ function createRegionSelectorWindow() {
       contextIsolation: true
     }
   });
-  win.setAlwaysOnTop(true, "screen-saver");
+  const isMac = process.platform === "darwin";
+  win.setAlwaysOnTop(true, isMac ? "pop-up-menu" : "screen-saver", 1);
   win.setContentProtection(true);
   if (VITE_DEV_SERVER_URL$1) {
     win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=region-selector");
@@ -505,8 +877,9 @@ function createRegionIndicatorWindow(region) {
       contextIsolation: true
     }
   });
-  win.setAlwaysOnTop(true, "screen-saver");
-  win.setIgnoreMouseEvents(true);
+  const isMac = process.platform === "darwin";
+  win.setAlwaysOnTop(true, isMac ? "pop-up-menu" : "screen-saver", 1);
+  win.setIgnoreMouseEvents(true, { forward: true });
   win.setContentProtection(true);
   if (VITE_DEV_SERVER_URL$1) {
     win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=region-indicator");
@@ -518,7 +891,8 @@ function createRegionIndicatorWindow(region) {
   win.webContents.once("did-finish-load", () => {
     win.webContents.send("region-indicator-update", {
       region,
-      isRecording: true,
+      isRecording: false,
+      // 初始状态：待录制
       isPaused: false
     });
   });
@@ -541,7 +915,7 @@ function updateRegionIndicatorWindow(region) {
     height: region.height + padding * 2 + labelHeight
   });
 }
-function createSourceSelectorWindow() {
+function createSourceSelectorWindow(mode) {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
     width: 620,
@@ -561,11 +935,12 @@ function createSourceSelectorWindow() {
       contextIsolation: true
     }
   });
+  const selectorMode = mode || "all";
   if (VITE_DEV_SERVER_URL$1) {
-    win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=source-selector");
+    win.loadURL(VITE_DEV_SERVER_URL$1 + `?windowType=source-selector&mode=${selectorMode}`);
   } else {
     win.loadFile(path.join(RENDERER_DIST$1, "index.html"), {
-      query: { windowType: "source-selector" }
+      query: { windowType: "source-selector", mode: selectorMode }
     });
   }
   return win;
@@ -651,7 +1026,7 @@ function createCameraPreviewWindow(options) {
   });
   return win;
 }
-const require2 = createRequire(import.meta.url);
+const require2 = createRequire$1(import.meta.url);
 const { uIOhook } = require2("uiohook-napi");
 let isTracking = false;
 let events = [];
@@ -819,6 +1194,10 @@ function recordClick(button = "left") {
 }
 let selectedSource = null;
 function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, getMainWindow, getSourceSelectorWindow, onRecordingStateChange) {
+  ipcMain.on("set-ignore-mouse-events", (event, ignore, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    win == null ? void 0 : win.setIgnoreMouseEvents(ignore, options);
+  });
   ipcMain.handle("get-sources", async (_, opts) => {
     const sources = await desktopCapturer.getSources(opts);
     return sources.map((source) => ({
@@ -840,13 +1219,13 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
   ipcMain.handle("get-selected-source", () => {
     return selectedSource;
   });
-  ipcMain.handle("open-source-selector", () => {
+  ipcMain.handle("open-source-selector", (_, mode) => {
     const sourceSelectorWin = getSourceSelectorWindow();
     if (sourceSelectorWin) {
       sourceSelectorWin.focus();
       return;
     }
-    createSourceSelectorWindow2();
+    createSourceSelectorWindow2(mode);
   });
   ipcMain.handle("switch-to-editor", () => {
     const mainWin = getMainWindow();
@@ -1259,6 +1638,18 @@ function getTrayIcon(filename) {
     quality: "best"
   });
 }
+function showMainWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+    showCameraPreviewWindowIfExists();
+  } else {
+    createWindow();
+  }
+}
 function updateTrayMenu(recording = false) {
   if (!tray) return;
   const trayIcon = recording ? recordingTrayIcon : defaultTrayIcon;
@@ -1274,20 +1665,13 @@ function updateTrayMenu(recording = false) {
     }
   ] : [
     {
-      label: "Open",
+      label: "打开中控台",
       click: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          if (mainWindow.isMinimized()) {
-            mainWindow.restore();
-            showCameraPreviewWindowIfExists();
-          }
-        } else {
-          createWindow();
-        }
+        showMainWindow();
       }
     },
     {
-      label: "Quit",
+      label: "退出",
       click: () => {
         app.quit();
       }
@@ -1296,6 +1680,10 @@ function updateTrayMenu(recording = false) {
   tray.setImage(trayIcon);
   tray.setToolTip(trayToolTip);
   tray.setContextMenu(Menu.buildFromTemplate(menuTemplate));
+  tray.removeAllListeners("click");
+  tray.on("click", () => {
+    showMainWindow();
+  });
 }
 function createEditorWindowWrapper() {
   if (mainWindow) {
@@ -1304,8 +1692,8 @@ function createEditorWindowWrapper() {
   }
   mainWindow = createEditorWindow();
 }
-function createSourceSelectorWindowWrapper() {
-  sourceSelectorWindow = createSourceSelectorWindow();
+function createSourceSelectorWindowWrapper(mode) {
+  sourceSelectorWindow = createSourceSelectorWindow(mode);
   sourceSelectorWindow.on("closed", () => {
     sourceSelectorWindow = null;
   });
@@ -1325,8 +1713,11 @@ app.on("activate", () => {
 app.whenReady().then(async () => {
   const { ipcMain: ipcMain2 } = await import("electron");
   ipcMain2.on("hud-overlay-close", () => {
-    closeCameraPreviewWindow();
-    app.quit();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+    }
+    hideCameraPreviewWindow();
+    updateTrayMenu();
   });
   createTray();
   updateTrayMenu();
