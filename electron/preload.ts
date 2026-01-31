@@ -176,4 +176,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteFlowGraph: (filePath: string) => {
     return ipcRenderer.invoke('delete-flow-graph', filePath)
   },
+
+  // Native Video Export APIs
+  checkNativeExporter: () => {
+    return ipcRenderer.invoke('native:check')
+  },
+  getNativeEncoders: () => {
+    return ipcRenderer.invoke('native:encoders')
+  },
+  getNativeGpuInfo: () => {
+    return ipcRenderer.invoke('native:gpu-info')
+  },
+  nativeExport: (config: any, onProgress?: (progress: any) => void) => {
+    // 监听进度更新
+    if (onProgress) {
+      const listener = (_: any, progress: any) => onProgress(progress)
+      ipcRenderer.on('native:progress', listener)
+      // 返回一个清理函数的 promise
+      return ipcRenderer.invoke('native:export', config).finally(() => {
+        ipcRenderer.removeListener('native:progress', listener)
+      })
+    }
+    return ipcRenderer.invoke('native:export', config)
+  },
+  cancelNativeExport: () => {
+    return ipcRenderer.invoke('native:cancel')
+  },
 })

@@ -30,6 +30,7 @@ export function PictureInPicture({
   containerHeight,
   currentTimeMs,
   isPlaying,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   videoDurationMs,
 }: PictureInPictureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);

@@ -1,0 +1,23 @@
+# Rust
+/target/
+Cargo.lock
+
+# Node
+node_modules/
+*.node
+
+# Build artifacts
+*.d.ts
+index.js
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

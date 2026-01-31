@@ -2,9 +2,10 @@ import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, closeCameraPreviewWindow, showCameraPreviewWindowIfExists, hideCameraPreviewWindow } from './windows'
+import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, closeCameraPreviewWindow, showCameraPreviewWindowIfExists } from './windows'
 import { registerIpcHandlers } from './ipc/handlers'
 import { cleanup as cleanupMouseTracker } from './mouseTracker'
+import { initializeNativeModule, registerNativeIpcHandlers } from './native'
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -158,6 +159,19 @@ app.whenReady().then(async () => {
     updateTrayMenu()
   // Ensure recordings directory exists
   await ensureRecordingsDir()
+
+  // Initialize native video export module (optional, will gracefully fail if not built)
+  try {
+    const nativeAvailable = initializeNativeModule();
+    if (nativeAvailable) {
+      registerNativeIpcHandlers();
+      console.log('[Main] Native video export module loaded');
+    } else {
+      console.log('[Main] Native module not available, using WebCodecs fallback');
+    }
+  } catch (error) {
+    console.warn('[Main] Failed to initialize native module:', error);
+  }
 
   registerIpcHandlers(
     createEditorWindowWrapper,

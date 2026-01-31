@@ -25,3 +25,10 @@ dist-ssr
 release/**
 *.kiro/
 # npx electron-builder --mac --win
+
+# Native module build artifacts
+native/target/
+native/node_modules/
+native/*.node
+native/index.js
+native/index.d.ts

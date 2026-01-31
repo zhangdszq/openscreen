@@ -23,3 +23,18 @@ export {
   isValidGifFrameRate 
 } from './types';
 
+// Native exporter (optional, requires Rust module)
+export {
+  isNativeExporterAvailable,
+  getAvailableEncoders,
+  getGpuInfo,
+  exportWithNative,
+  cancelNativeExport,
+} from './nativeExporter';
+export type {
+  NativeExportConfig,
+  NativeExportProgress,
+  NativeExportResult,
+  GpuInfo,
+} from './nativeExporter';
+

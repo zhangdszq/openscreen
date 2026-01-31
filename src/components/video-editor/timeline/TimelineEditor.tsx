@@ -24,7 +24,7 @@ import { TutorialHelp } from "../TutorialHelp";
 const ZOOM_ROW_ID = "row-zoom";
 const TRIM_ROW_ID = "row-trim";
 const ANNOTATION_ROW_ID = "row-annotation";
-const MOUSE_ROW_ID = "row-mouse";
+// const MOUSE_ROW_ID = "row-mouse"; // Reserved for future use
 const FALLBACK_RANGE_MS = 1000;
 const TARGET_MARKER_COUNT = 12;
 
@@ -250,6 +250,7 @@ function PlaybackCursor({
 // Mouse click markers component
 function MouseClickMarkers({
   clickEvents,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   videoDurationMs,
 }: {
   clickEvents: RecordedMouseEvent[];

@@ -310,10 +310,31 @@ export function registerIpcHandlers(
   ipcMain.handle('load-region-info', async (_, videoPath: string) => {
     try {
       const regionFilePath = videoPath.replace(/\.[^.]+$/, '.region.json');
+      console.log('[Region] Loading from:', regionFilePath);
       const data = await fs.readFile(regionFilePath, 'utf-8');
       const regionInfo = JSON.parse(data);
-      return { success: true, data: regionInfo };
-    } catch {
+      console.log('[Region] Loaded:', regionInfo);
+      
+      // Also get video dimensions using ffprobe
+      let videoWidth = 0;
+      let videoHeight = 0;
+      try {
+        const { execSync } = await import('child_process');
+        const ffprobeCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${videoPath}"`;
+        const output = execSync(ffprobeCmd, { encoding: 'utf-8' }).trim();
+        const [w, h] = output.split(',').map(Number);
+        if (w > 0 && h > 0) {
+          videoWidth = w;
+          videoHeight = h;
+          console.log('[Region] Video dimensions:', videoWidth, 'x', videoHeight);
+        }
+      } catch (ffErr) {
+        console.log('[Region] FFprobe failed:', ffErr);
+      }
+      
+      return { success: true, data: regionInfo, videoWidth, videoHeight };
+    } catch (err) {
+      console.log('[Region] Not found or error:', err);
       return { success: false, error: 'No region info found' };
     }
   });

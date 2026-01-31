@@ -132,7 +132,9 @@ export class VideoExporter {
           });
           
           // Pre-seek camera video to start
-          cameraVideoElement.currentTime = 0;
+          if (cameraVideoElement) {
+            cameraVideoElement.currentTime = 0;
+          }
           
           console.log('[VideoExporter] Camera video loaded for compositing');
         } catch (error) {
@@ -218,7 +220,7 @@ export class VideoExporter {
               (videoElement as any).requestVideoFrameCallback(() => resolve());
             } else {
               // Fallback for browsers without requestVideoFrameCallback
-              videoElement.addEventListener('seeked', () => resolve(), { once: true });
+              (videoElement as HTMLVideoElement).addEventListener('seeked', () => resolve(), { once: true });
             }
           });
         } else if (i === 0) {
@@ -258,7 +260,7 @@ export class VideoExporter {
               if ('requestVideoFrameCallback' in cameraVideoElement) {
                 (cameraVideoElement as any).requestVideoFrameCallback(() => resolve());
               } else {
-                cameraVideoElement.addEventListener('seeked', () => resolve(), { once: true });
+                (cameraVideoElement as HTMLVideoElement).addEventListener('seeked', () => resolve(), { once: true });
               }
             });
           }

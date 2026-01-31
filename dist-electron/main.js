@@ -3,8 +3,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
-const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
-const APP_ROOT = path.join(__dirname$1, "..");
+import path$1 from "path";
+import fs$1 from "fs";
+import { fileURLToPath as fileURLToPath$1 } from "url";
+import { createRequire as createRequire$1 } from "module";
+const __dirname$2 = path.dirname(fileURLToPath(import.meta.url));
+const APP_ROOT = path.join(__dirname$2, "..");
 const VITE_DEV_SERVER_URL$1 = process.env["VITE_DEV_SERVER_URL"];
 const RENDERER_DIST$1 = path.join(APP_ROOT, "dist");
 let hudOverlayWindow = null;
@@ -300,7 +304,7 @@ function createHudOverlayWindow() {
     skipTaskbar: true,
     hasShadow: false,
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false
@@ -343,7 +347,7 @@ function createEditorWindow() {
     title: "OpenScreen",
     backgroundColor: "#000000",
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
@@ -420,7 +424,7 @@ function createRegionSelectorWindow() {
     hasShadow: false,
     backgroundColor: "#00000000",
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
@@ -461,7 +465,7 @@ function createSourceSelectorWindow() {
     transparent: true,
     backgroundColor: "#00000000",
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
@@ -519,7 +523,7 @@ function createCameraPreviewWindow(options) {
     backgroundColor: "#00000000",
     // Fully transparent background
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false
@@ -556,8 +560,8 @@ function createCameraPreviewWindow(options) {
   });
   return win;
 }
-const require2 = createRequire(import.meta.url);
-const { uIOhook } = require2("uiohook-napi");
+const require$1 = createRequire(import.meta.url);
+const { uIOhook } = require$1("uiohook-napi");
 let isTracking = false;
 let events = [];
 let startTime = 0;
@@ -972,10 +976,28 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
   ipcMain.handle("load-region-info", async (_, videoPath) => {
     try {
       const regionFilePath = videoPath.replace(/\.[^.]+$/, ".region.json");
+      console.log("[Region] Loading from:", regionFilePath);
       const data = await fs.readFile(regionFilePath, "utf-8");
       const regionInfo = JSON.parse(data);
-      return { success: true, data: regionInfo };
-    } catch {
+      console.log("[Region] Loaded:", regionInfo);
+      let videoWidth = 0;
+      let videoHeight = 0;
+      try {
+        const { execSync } = await import("child_process");
+        const ffprobeCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${videoPath}"`;
+        const output = execSync(ffprobeCmd, { encoding: "utf-8" }).trim();
+        const [w, h] = output.split(",").map(Number);
+        if (w > 0 && h > 0) {
+          videoWidth = w;
+          videoHeight = h;
+          console.log("[Region] Video dimensions:", videoWidth, "x", videoHeight);
+        }
+      } catch (ffErr) {
+        console.log("[Region] FFprobe failed:", ffErr);
+      }
+      return { success: true, data: regionInfo, videoWidth, videoHeight };
+    } catch (err) {
+      console.log("[Region] Not found or error:", err);
       return { success: false, error: "No region info found" };
     }
   });
@@ -1129,6 +1151,169 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     }
   });
 }
+const __filename = fileURLToPath$1(import.meta.url);
+const __dirname$1 = path$1.dirname(__filename);
+const require2 = createRequire$1(import.meta.url);
+function getFfmpegDir() {
+  const platform = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+  const possiblePaths = [
+    // 生产环境
+    path$1.join(process.resourcesPath || "", "ffmpeg", platform),
+    // 开发环境
+    path$1.join(__dirname$1, "..", "ffmpeg", platform),
+    path$1.join(__dirname$1, "..", "..", "ffmpeg", platform),
+    // 项目根目录
+    path$1.join(app.getAppPath(), "ffmpeg", platform)
+  ];
+  for (const ffmpegPath of possiblePaths) {
+    const ffmpegExe = process.platform === "win32" ? path$1.join(ffmpegPath, "ffmpeg.exe") : path$1.join(ffmpegPath, "ffmpeg");
+    if (fs$1.existsSync(ffmpegExe)) {
+      console.log("[Native] Found bundled FFmpeg at:", ffmpegPath);
+      return ffmpegPath;
+    }
+  }
+  console.log("[Native] No bundled FFmpeg found, will use system PATH");
+  return void 0;
+}
+let nativeModule = null;
+let currentExporter = null;
+let isInitialized = false;
+function loadNativeModule() {
+  if (nativeModule) {
+    return nativeModule;
+  }
+  try {
+    const possiblePaths = [
+      // 开发环境
+      path$1.join(__dirname$1, "..", "native"),
+      path$1.join(__dirname$1, "..", "..", "native"),
+      // 生产环境
+      path$1.join(process.resourcesPath || "", "native"),
+      // node_modules
+      "openscreen-native"
+    ];
+    for (const modulePath of possiblePaths) {
+      try {
+        const module = require2(modulePath);
+        if (module && typeof module.NativeVideoExporter === "function") {
+          console.log("[Native] Loaded from:", modulePath);
+          nativeModule = module;
+          return module;
+        }
+      } catch {
+      }
+    }
+    console.warn("[Native] Module not found in any path");
+    return null;
+  } catch (error) {
+    console.error("[Native] Failed to load module:", error);
+    return null;
+  }
+}
+function initializeNativeModule() {
+  if (isInitialized) {
+    return nativeModule !== null;
+  }
+  const module = loadNativeModule();
+  if (module) {
+    try {
+      module.initLogger("info");
+      console.log("[Native] Module initialized");
+      console.log("[Native] Available encoders:", module.getAvailableEncoders());
+      isInitialized = true;
+      return true;
+    } catch (error) {
+      console.error("[Native] Initialization failed:", error);
+      return false;
+    }
+  }
+  isInitialized = true;
+  return false;
+}
+function registerNativeIpcHandlers() {
+  ipcMain.handle("native:check", async () => {
+    return loadNativeModule() !== null;
+  });
+  ipcMain.handle("native:encoders", async () => {
+    const module = loadNativeModule();
+    if (module) {
+      return module.getAvailableEncoders();
+    }
+    return ["x264"];
+  });
+  ipcMain.handle("native:gpu-info", async () => {
+    const module = loadNativeModule();
+    if (module) {
+      try {
+        return await module.checkGpuSupport();
+      } catch (error) {
+        console.error("[Native] GPU check failed:", error);
+      }
+    }
+    return { supported: false };
+  });
+  ipcMain.handle("native:export", async (event, config) => {
+    const module = loadNativeModule();
+    if (!module) {
+      return {
+        success: false,
+        error: "Native module not available"
+      };
+    }
+    try {
+      const ffmpegDir = getFfmpegDir();
+      let wallpaperPath = config.wallpaper;
+      if (wallpaperPath) {
+        if (wallpaperPath.startsWith("/")) {
+          const publicDir = app.isPackaged ? path$1.join(process.resourcesPath, "public") : path$1.join(app.getAppPath(), "public");
+          wallpaperPath = path$1.join(publicDir, wallpaperPath);
+          console.log("[Native] Resolved wallpaper path:", wallpaperPath);
+        } else if (wallpaperPath.startsWith("file://")) {
+          wallpaperPath = decodeURIComponent(wallpaperPath.replace("file:///", "").replace(/\//g, path$1.sep));
+        }
+      }
+      const finalConfig = {
+        ...config,
+        ffmpegDir: config.ffmpegDir || ffmpegDir,
+        wallpaper: wallpaperPath
+      };
+      console.log("[Native] Export config:", JSON.stringify(finalConfig, null, 2));
+      currentExporter = new module.NativeVideoExporter(finalConfig);
+      const result = await currentExporter.export((progress) => {
+        event.sender.send("native:progress", {
+          currentFrame: progress.currentFrame,
+          totalFrames: progress.totalFrames,
+          percentage: progress.percentage,
+          stage: progress.stage,
+          estimatedTimeRemaining: progress.estimatedTimeRemaining,
+          fps: progress.fps
+        });
+      });
+      currentExporter = null;
+      return {
+        success: result.success,
+        outputPath: result.outputPath,
+        error: result.error,
+        durationMs: result.durationMs,
+        encoderUsed: result.encoderUsed,
+        totalFrames: result.totalFrames
+      };
+    } catch (error) {
+      currentExporter = null;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  });
+  ipcMain.handle("native:cancel", async () => {
+    if (currentExporter) {
+      return currentExporter.cancel();
+    }
+    return false;
+  });
+  console.log("[Native] IPC handlers registered");
+}
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECORDINGS_DIR = path.join(app.getPath("userData"), "recordings");
 async function ensureRecordingsDir() {
@@ -1236,6 +1421,17 @@ app.whenReady().then(async () => {
   createTray();
   updateTrayMenu();
   await ensureRecordingsDir();
+  try {
+    const nativeAvailable = initializeNativeModule();
+    if (nativeAvailable) {
+      registerNativeIpcHandlers();
+      console.log("[Main] Native video export module loaded");
+    } else {
+      console.log("[Main] Native module not available, using WebCodecs fallback");
+    }
+  } catch (error) {
+    console.warn("[Main] Failed to initialize native module:", error);
+  }
   registerIpcHandlers(
     createEditorWindowWrapper,
     createSourceSelectorWindowWrapper,

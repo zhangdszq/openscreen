@@ -41,7 +41,9 @@ export class AudioExtractor {
         // @ts-ignore - audioTracks may not be in TypeScript types
         const hasAudio = video.audioTracks?.length > 0 || 
           // Fallback: try to detect audio by checking if video can play audio
+          // @ts-ignore - mozHasAudio is Firefox-specific
           video.mozHasAudio || 
+          // @ts-ignore - webkitAudioDecodedByteCount is WebKit-specific
           video.webkitAudioDecodedByteCount > 0 ||
           // Most reliable way: assume audio exists and let extraction fail if not
           true;

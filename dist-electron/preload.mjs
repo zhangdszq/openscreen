@@ -163,5 +163,28 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   deleteFlowGraph: (filePath) => {
     return electron.ipcRenderer.invoke("delete-flow-graph", filePath);
+  },
+  // Native Video Export APIs
+  checkNativeExporter: () => {
+    return electron.ipcRenderer.invoke("native:check");
+  },
+  getNativeEncoders: () => {
+    return electron.ipcRenderer.invoke("native:encoders");
+  },
+  getNativeGpuInfo: () => {
+    return electron.ipcRenderer.invoke("native:gpu-info");
+  },
+  nativeExport: (config, onProgress) => {
+    if (onProgress) {
+      const listener = (_, progress) => onProgress(progress);
+      electron.ipcRenderer.on("native:progress", listener);
+      return electron.ipcRenderer.invoke("native:export", config).finally(() => {
+        electron.ipcRenderer.removeListener("native:progress", listener);
+      });
+    }
+    return electron.ipcRenderer.invoke("native:export", config);
+  },
+  cancelNativeExport: () => {
+    return electron.ipcRenderer.invoke("native:cancel");
   }
 });

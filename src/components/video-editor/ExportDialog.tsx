@@ -157,7 +157,7 @@ export function ExportDialog({
                       </span>
                     )
                   ) : (
-                    `${progress.percentage.toFixed(0)}%`
+                    `${(progress.percentage ?? 0).toFixed(0)}%`
                   )}
                 </span>
               </div>

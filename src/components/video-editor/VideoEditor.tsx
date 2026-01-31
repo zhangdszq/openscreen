@@ -22,6 +22,7 @@ import {
   DEFAULT_CLICK_ZOOM_DURATION_MS,
   DEFAULT_CLICK_ZOOM_LEAD_MS,
   DEFAULT_CAMERA_OVERLAY,
+  ZOOM_DEPTH_SCALES,
   type ZoomDepth,
   type ZoomFocus,
   type ZoomRegion,
@@ -34,7 +35,7 @@ import {
   type CameraOverlay,
 } from "./types";
 import PictureInPicture from "./PictureInPicture";
-import { VideoExporter, GifExporter, type ExportProgress, type ExportQuality, type ExportSettings, type ExportFormat, type GifFrameRate, type GifSizePreset, GIF_SIZE_PRESETS, calculateOutputDimensions } from "@/lib/exporter";
+import { VideoExporter, GifExporter, type ExportProgress, type ExportQuality, type ExportSettings, type ExportFormat, type GifFrameRate, type GifSizePreset, GIF_SIZE_PRESETS, calculateOutputDimensions, isNativeExporterAvailable, exportWithNative } from "@/lib/exporter";
 import { type AspectRatio, getAspectRatioValue } from "@/utils/aspectRatioUtils";
 import { getAssetPath } from "@/lib/assetPath";
 
@@ -60,6 +61,8 @@ export default function VideoEditor() {
   const [borderRadius, setBorderRadius] = useState(0);
   const [padding, setPadding] = useState(50);
   const [cropRegion, setCropRegion] = useState<CropRegion>(DEFAULT_CROP_REGION);
+  const regionCropRef = useRef<CropRegion | null>(null); // Store region crop for export
+  const regionPixelSizeRef = useRef<{ width: number; height: number } | null>(null); // Store original pixel size
   const [zoomRegions, setZoomRegions] = useState<ZoomRegion[]>([]);
   const [selectedZoomId, setSelectedZoomId] = useState<string | null>(null);
   const [trimRegions, setTrimRegions] = useState<TrimRegion[]>([]);
@@ -80,6 +83,7 @@ export default function VideoEditor() {
   
   // Camera overlay (picture-in-picture) state
   const [cameraOverlay, setCameraOverlay] = useState<CameraOverlay>(DEFAULT_CAMERA_OVERLAY);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [cameraVideoPath, setCameraVideoPath] = useState<string | null>(null);
   
   // Pro feature state
@@ -138,17 +142,49 @@ export default function VideoEditor() {
           // Try to load region info (for region recordings)
           if (window.electronAPI.loadRegionInfo) {
             try {
-              const regionResult = await window.electronAPI.loadRegionInfo(result.path);
+              console.log('[Region] Loading region info for:', result.path);
+              const regionResult = await window.electronAPI.loadRegionInfo(result.path) as {
+                success: boolean;
+                data?: { x: number; y: number; width: number; height: number };
+                videoWidth?: number;
+                videoHeight?: number;
+              };
+              console.log('[Region] Load result:', regionResult);
               if (regionResult.success && regionResult.data) {
-                const region = regionResult.data as { x: number; y: number; width: number; height: number };
-                console.log('Loaded region info:', region);
-                // We'll apply crop after video loads and we know the dimensions
-                // Store it temporarily
-                (window as any).__pendingRegionCrop = region;
+                const region = regionResult.data;
+                const videoWidth = regionResult.videoWidth || 0;
+                const videoHeight = regionResult.videoHeight || 0;
+                console.log('[Region] Region:', region, 'Video:', videoWidth, 'x', videoHeight);
+                
+                if (videoWidth > 0 && videoHeight > 0) {
+                  const cropX = region.x / videoWidth;
+                  const cropY = region.y / videoHeight;
+                  const cropWidth = region.width / videoWidth;
+                  const cropHeight = region.height / videoHeight;
+                  const normalizedCrop = {
+                    x: Math.max(0, Math.min(1, cropX)),
+                    y: Math.max(0, Math.min(1, cropY)),
+                    width: Math.max(0.1, Math.min(1 - Math.max(0, cropX), cropWidth)),
+                    height: Math.max(0.1, Math.min(1 - Math.max(0, cropY), cropHeight)),
+                  };
+                  console.log('[Region] Applied crop:', normalizedCrop);
+                  regionCropRef.current = normalizedCrop;  // Store in ref for export
+                  // 存储裁剪区域的原始像素尺寸
+                  regionPixelSizeRef.current = { width: region.width, height: region.height };
+                  console.log('[Region] Stored pixel size:', region.width, 'x', region.height);
+                  setCropRegion(normalizedCrop);
+                } else {
+                  console.log('[Region] No video dimensions, storing for later');
+                  (window as any).__pendingRegionCrop = region;
+                }
+              } else {
+                console.log('[Region] No region data in result');
               }
             } catch (regionErr) {
-              console.log('No region info found for this video');
+              console.log('[Region] Error loading region info:', regionErr);
             }
+          } else {
+            console.log('[Region] loadRegionInfo API not available');
           }
           
           // Try to load camera video (recorded separately)
@@ -615,42 +651,6 @@ export default function VideoEditor() {
     }
   }, [selectedAnnotationId, annotationRegions]);
 
-  const handleOpenExportDialog = useCallback(() => {
-    if (!videoPath) {
-      toast.error('No video loaded');
-      return;
-    }
-
-    const video = videoPlaybackRef.current?.video;
-    if (!video) {
-      toast.error('Video not ready');
-      return;
-    }
-
-    // Build export settings from current state
-    const sourceWidth = video.videoWidth || 1920;
-    const sourceHeight = video.videoHeight || 1080;
-    const gifDimensions = calculateOutputDimensions(sourceWidth, sourceHeight, gifSizePreset, GIF_SIZE_PRESETS);
-
-    const settings: ExportSettings = {
-      format: exportFormat,
-      quality: exportFormat === 'mp4' ? exportQuality : undefined,
-      gifConfig: exportFormat === 'gif' ? {
-        frameRate: gifFrameRate,
-        loop: gifLoop,
-        sizePreset: gifSizePreset,
-        width: gifDimensions.width,
-        height: gifDimensions.height,
-      } : undefined,
-    };
-
-    setShowExportDialog(true);
-    setExportError(null);
-    
-    // Start export immediately
-    handleExport(settings);
-  }, [videoPath, exportFormat, exportQuality, gifFrameRate, gifLoop, gifSizePreset]);
-
   const handleExport = useCallback(async (settings: ExportSettings) => {
     if (!videoPath) {
       toast.error('No video loaded');
@@ -681,8 +681,9 @@ export default function VideoEditor() {
       }
       
       const aspectRatioValue = getAspectRatioValue(aspectRatio);
-      const sourceWidth = video.videoWidth || 1920;
-      const sourceHeight = video.videoHeight || 1080;
+      // Source dimensions for future use
+      // const sourceWidth = video.videoWidth || 1920;
+      // const sourceHeight = video.videoHeight || 1080;
       
       // Get preview CONTAINER dimensions for scaling
       const playbackRef = videoPlaybackRef.current;
@@ -750,69 +751,207 @@ export default function VideoEditor() {
         // Quality-based target resolution:
         // - medium (Low): 720p, 8 Mbps
         // - good (Medium): 1080p, 15 Mbps  
-        // - source (High): 4K (2160p), 25 Mbps
-        const targetHeight = quality === 'medium' ? 720 : quality === 'good' ? 1080 : 2160;
+        // - source (High): 原始尺寸, 25 Mbps
         
-        // Calculate dimensions maintaining aspect ratio
-        exportHeight = Math.floor(targetHeight / 2) * 2;
+        // 输出尺寸始终取决于编辑器画布的宽高比（aspectRatioValue）
+        // 而不是录制视频或裁剪区域的尺寸
+        const crop = regionCropRef.current || cropRegion;
+        const hasRegionCrop = crop && (crop.x !== 0 || crop.y !== 0 || crop.width !== 1 || crop.height !== 1);
+        
+        // 根据质量选择目标高度
+        const targetH = quality === 'medium' ? 720 : quality === 'good' ? 1080 : 2160;
+        exportHeight = Math.floor(targetH / 2) * 2;
+        // 使用编辑器画布的宽高比计算宽度
         exportWidth = Math.floor((exportHeight * aspectRatioValue) / 2) * 2;
         
+        console.log('[Export] Canvas aspect ratio:', aspectRatioValue, 'Output:', exportWidth, 'x', exportHeight);
+        if (hasRegionCrop) {
+          console.log('[Export] Has crop region, will be scaled to fit canvas');
+        }
+        
         // Adjust bitrate based on resolution
-        if (targetHeight <= 720) {
+        if (exportHeight <= 720) {
           bitrate = 8_000_000;   // 8 Mbps for 720p
-        } else if (targetHeight <= 1080) {
+        } else if (exportHeight <= 1080) {
           bitrate = 15_000_000;  // 15 Mbps for 1080p
         } else {
           bitrate = 25_000_000;  // 25 Mbps for 4K
         }
 
-        const exporter = new VideoExporter({
-          videoUrl: videoPath,
-          width: exportWidth,
-          height: exportHeight,
-          frameRate: 30,
-          bitrate,
-          codec: 'avc1.640033',
-          wallpaper,
-          zoomRegions,
-          trimRegions,
-          showShadow: shadowIntensity > 0,
-          shadowIntensity,
-          showBlur,
-          motionBlurEnabled,
-          borderRadius,
-          padding,
-          cropRegion,
-          annotationRegions,
-          previewWidth,
-          previewHeight,
-          cameraOverlay: cameraOverlay.enabled ? cameraOverlay : undefined,
-          onProgress: (progress: ExportProgress) => {
-            setExportProgress(progress);
-          },
-        });
+        // Try native exporter first for better performance
+        const nativeAvailable = await isNativeExporterAvailable();
+        console.log('[VideoEditor] Native exporter available:', nativeAvailable);
 
-        exporterRef.current = exporter;
-        const result = await exporter.export();
+        if (nativeAvailable) {
+          // Use native Rust exporter with hardware acceleration
+          console.log('[VideoEditor] Using native exporter');
+          toast.info('Using hardware-accelerated export');
 
-        if (result.success && result.blob) {
-          const arrayBuffer = await result.blob.arrayBuffer();
           const timestamp = Date.now();
           const fileName = `export-${timestamp}.mp4`;
           
-          const saveResult = await window.electronAPI.saveExportedVideo(arrayBuffer, fileName);
+          // Get output path from user
+          const saveResult = await window.electronAPI.saveExportedVideo(new ArrayBuffer(0), fileName);
           
           if (saveResult.cancelled) {
             toast.info('Export cancelled');
-          } else if (saveResult.success) {
-            toast.success(`Video exported successfully to ${saveResult.path}`);
+            return;
+          }
+
+          if (!saveResult.path) {
+            throw new Error('No output path selected');
+          }
+
+          // 转换 file:// URL 为普通路径
+          let inputFilePath = videoPath;
+          if (videoPath.startsWith('file://')) {
+            inputFilePath = decodeURIComponent(videoPath.replace('file:///', '').replace(/\//g, '\\'));
+          }
+          console.log('[VideoEditor] Native export input path:', inputFilePath);
+
+          const nativeResult = await exportWithNative({
+            inputPath: inputFilePath,
+            outputPath: saveResult.path,
+            width: exportWidth,
+            height: exportHeight,
+            frameRate: 30,
+            bitrate,
+            zoomRegions: zoomRegions.map(r => ({
+              id: r.id,
+              startMs: r.startMs,
+              endMs: r.endMs,
+              targetX: r.focus?.cx ?? 0.5,
+              targetY: r.focus?.cy ?? 0.5,
+              // 使用 ZOOM_DEPTH_SCALES 将 depth (1-6) 转换为实际 scale 值
+              scale: ZOOM_DEPTH_SCALES[r.depth] ?? 1.5,
+              easing: 'easeInOut',
+            })),
+            // 转换 cropRegion 格式: {x,y,width,height} -> {left,top,right,bottom}
+            // 优先使用 ref 中存储的区域裁剪信息（来自录制时的区域选择）
+            cropRegion: (() => {
+              const crop = regionCropRef.current || cropRegion;
+              console.log('[Export] Using cropRegion:', crop, 'from ref:', !!regionCropRef.current);
+              return crop ? {
+                left: crop.x,
+                top: crop.y,
+                right: crop.x + crop.width,
+                bottom: crop.y + crop.height,
+              } : undefined;
+            })(),
+            trimRegions: trimRegions.map(r => ({
+              id: r.id,
+              startMs: r.startMs,
+              endMs: r.endMs,
+            })),
+            annotationRegions: annotationRegions.map(r => ({
+              id: r.id,
+              annotationType: r.type || 'rectangle',
+              startMs: r.startMs,
+              endMs: r.endMs,
+              x: r.x,
+              y: r.y,
+              width: r.width,
+              height: r.height,
+              color: r.style?.stroke,
+              strokeWidth: r.style?.strokeWidth,
+            })),
+            showShadow: shadowIntensity > 0,
+            shadowIntensity,
+            showBlur,
+            motionBlurEnabled,
+            borderRadius,
+            padding,
+            // 传递预览区域宽度，用于缩放 borderRadius
+            previewWidth: videoPlaybackRef.current?.containerRef?.current?.clientWidth || 800,
+            // 传递背景图路径（由 native.ts 进行路径转换）
+            wallpaper: wallpaper || undefined,
+            // 传递摄像头画中画配置
+            ...((() => {
+              console.log('[Export] Camera overlay state:', cameraOverlay);
+              return {};
+            })()),
+            cameraOverlay: cameraOverlay.enabled && cameraOverlay.videoPath ? {
+              enabled: true,
+              videoPath: cameraOverlay.videoPath.startsWith('file://') 
+                ? decodeURIComponent(cameraOverlay.videoPath.replace('file:///', '').replace(/\//g, '\\'))
+                : cameraOverlay.videoPath,
+              shape: cameraOverlay.shape,
+              size: cameraOverlay.size,
+              position: cameraOverlay.position,
+              opacity: cameraOverlay.opacity,
+              borderStyle: cameraOverlay.borderStyle,
+            } : undefined,
+            preferredEncoder: 'nvenc', // Prefer NVIDIA hardware encoding
+            useGpuRendering: true,
+          }, (progress) => {
+            setExportProgress({
+              percent: progress.percentage,
+              stage: progress.stage,
+              currentFrame: progress.currentFrame,
+              totalFrames: progress.totalFrames,
+              estimatedTimeRemaining: progress.estimatedTimeRemaining,
+              fps: progress.fps,
+            });
+          });
+
+          if (nativeResult.success) {
+            console.log('[VideoEditor] Native export completed:', nativeResult);
+            toast.success(`Video exported with ${nativeResult.encoderUsed || 'hardware'} encoder (${(nativeResult.durationMs! / 1000).toFixed(1)}s)`);
           } else {
-            setExportError(saveResult.message || 'Failed to save video');
-            toast.error(saveResult.message || 'Failed to save video');
+            throw new Error(nativeResult.error || 'Native export failed');
           }
         } else {
-          setExportError(result.error || 'Export failed');
-          toast.error(result.error || 'Export failed');
+          // Fallback to WebCodecs exporter
+          console.log('[VideoEditor] Using WebCodecs exporter (fallback)');
+
+          const exporter = new VideoExporter({
+            videoUrl: videoPath,
+            width: exportWidth,
+            height: exportHeight,
+            frameRate: 30,
+            bitrate,
+            codec: 'avc1.640033',
+            wallpaper,
+            zoomRegions,
+            trimRegions,
+            showShadow: shadowIntensity > 0,
+            shadowIntensity,
+            showBlur,
+            motionBlurEnabled,
+            borderRadius,
+            padding,
+            cropRegion,
+            annotationRegions,
+            previewWidth,
+            previewHeight,
+            cameraOverlay: cameraOverlay.enabled ? cameraOverlay : undefined,
+            onProgress: (progress: ExportProgress) => {
+              setExportProgress(progress);
+            },
+          });
+
+          exporterRef.current = exporter;
+          const result = await exporter.export();
+
+          if (result.success && result.blob) {
+            const arrayBuffer = await result.blob.arrayBuffer();
+            const timestamp = Date.now();
+            const fileName = `export-${timestamp}.mp4`;
+            
+            const saveResult = await window.electronAPI.saveExportedVideo(arrayBuffer, fileName);
+            
+            if (saveResult.cancelled) {
+              toast.info('Export cancelled');
+            } else if (saveResult.success) {
+              toast.success(`Video exported successfully to ${saveResult.path}`);
+            } else {
+              setExportError(saveResult.message || 'Failed to save video');
+              toast.error(saveResult.message || 'Failed to save video');
+            }
+          } else {
+            setExportError(result.error || 'Export failed');
+            toast.error(result.error || 'Export failed');
+          }
         }
       }
 
@@ -833,6 +972,42 @@ export default function VideoEditor() {
       setExportProgress(null);
     }
   }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, annotationRegions, isPlaying, aspectRatio, exportQuality, cameraOverlay]);
+
+  const handleOpenExportDialog = useCallback(() => {
+    if (!videoPath) {
+      toast.error('No video loaded');
+      return;
+    }
+
+    const video = videoPlaybackRef.current?.video;
+    if (!video) {
+      toast.error('Video not ready');
+      return;
+    }
+
+    // Build export settings from current state
+    const sourceWidth = video.videoWidth || 1920;
+    const sourceHeight = video.videoHeight || 1080;
+    const gifDimensions = calculateOutputDimensions(sourceWidth, sourceHeight, gifSizePreset, GIF_SIZE_PRESETS);
+
+    const settings: ExportSettings = {
+      format: exportFormat,
+      quality: exportFormat === 'mp4' ? exportQuality : undefined,
+      gifConfig: exportFormat === 'gif' ? {
+        frameRate: gifFrameRate,
+        loop: gifLoop,
+        sizePreset: gifSizePreset,
+        width: gifDimensions.width,
+        height: gifDimensions.height,
+      } : undefined,
+    };
+
+    setShowExportDialog(true);
+    setExportError(null);
+    
+    // Start export immediately
+    handleExport(settings);
+  }, [videoPath, exportFormat, exportQuality, gifFrameRate, gifLoop, gifSizePreset, handleExport]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {
@@ -900,10 +1075,12 @@ export default function VideoEditor() {
                         setDuration(dur);
                         // Apply pending region crop if exists
                         const pendingRegion = (window as any).__pendingRegionCrop;
+                        console.log('[Region] onDurationChange - pendingRegion:', pendingRegion, 'videoRef:', !!videoPlaybackRef.current?.video);
                         if (pendingRegion && videoPlaybackRef.current?.video) {
                           const video = videoPlaybackRef.current.video;
                           const videoWidth = video.videoWidth;
                           const videoHeight = video.videoHeight;
+                          console.log('[Region] Video dimensions:', videoWidth, 'x', videoHeight);
                           
                           if (videoWidth > 0 && videoHeight > 0) {
                             // Convert pixel region to normalized crop region (0-1)

@@ -1,0 +1,54 @@
+[package]
+name = "openscreen-native"
+version = "0.1.0"
+edition = "2021"
+description = "Native video export module for Openscreen"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Node.js 绑定
+napi = { version = "2", default-features = false, features = ["async", "napi8", "serde-json"] }
+napi-derive = "2"
+
+# 异步运行时
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+
+# 并行处理
+rayon = "1.8"
+crossbeam-channel = "0.5"
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 错误处理
+thiserror = "1"
+anyhow = "1"
+
+# GPU 渲染 (WebGPU 实现)
+wgpu = "0.19"
+bytemuck = { version = "1", features = ["derive"] }
+
+# 图像处理
+image = "0.25"
+
+# CPU 数量检测
+num_cpus = "1.16"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
