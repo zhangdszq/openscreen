@@ -55,6 +55,9 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   openExternalUrl: (url) => {
     return electron.ipcRenderer.invoke("open-external-url", url);
   },
+  openScreenRecordingSettings: () => {
+    return electron.ipcRenderer.invoke("open-screen-recording-settings");
+  },
   saveExportedVideo: (videoData, fileName) => {
     return electron.ipcRenderer.invoke("save-exported-video", videoData, fileName);
   },

@@ -59,6 +59,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternalUrl: (url: string) => {
     return ipcRenderer.invoke('open-external-url', url)
   },
+  openScreenRecordingSettings: () => {
+    return ipcRenderer.invoke('open-screen-recording-settings')
+  },
   saveExportedVideo: (videoData: ArrayBuffer, fileName: string) => {
     return ipcRenderer.invoke('save-exported-video', videoData, fileName)
   },

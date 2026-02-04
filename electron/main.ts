@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, Tray, Menu, nativeImage, systemPreferences, dialog } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
@@ -158,8 +158,41 @@ app.on('activate', () => {
 
 
 
+// Check and request screen recording permission on macOS
+async function checkScreenCapturePermission(): Promise<boolean> {
+  if (process.platform !== 'darwin') return true;
+  
+  const status = systemPreferences.getMediaAccessStatus('screen');
+  console.log('Screen capture permission status:', status);
+  
+  if (status === 'granted') {
+    return true;
+  }
+  
+  // Show dialog to guide user
+  const result = await dialog.showMessageBox({
+    type: 'warning',
+    title: '需要屏幕录制权限',
+    message: 'OpenScreen 需要屏幕录制权限才能录制屏幕。',
+    detail: '请在系统设置中授予权限：\n系统设置 → 隐私与安全性 → 屏幕录制 → 启用 Electron/Openscreen',
+    buttons: ['打开系统设置', '稍后'],
+    defaultId: 0,
+  });
+  
+  if (result.response === 0) {
+    // Open System Preferences to Screen Recording
+    const { shell } = await import('electron');
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+  }
+  
+  return status === 'granted';
+}
+
 // Register all IPC handlers when app is ready
 app.whenReady().then(async () => {
+    // Check screen capture permission first
+    await checkScreenCapturePermission();
+    
     // Listen for HUD overlay close event - hide to tray instead of quitting
     const { ipcMain } = await import('electron');
     ipcMain.on('hud-overlay-close', () => {

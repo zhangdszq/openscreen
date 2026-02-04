@@ -88,6 +88,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
   const startTime = useRef<number>(0);
   const recordingTimestamp = useRef<number>(0);
   const recordingBounds = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const systemAudioPermissionPrompted = useRef(false);
   
   // Camera separate recording
   const cameraRecorder = useRef<MediaRecorder | null>(null);
@@ -371,26 +372,83 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 
       // 判断是否需要系统声音 - 只有开启且有可用的 sourceId 时才捕获
       const captureSystemAudio = systemAudioSettings.enabled && actualSourceId;
-      
-      const mediaStream = await (navigator.mediaDevices as any).getUserMedia({
-        audio: captureSystemAudio ? {
-          mandatory: {
-            chromeMediaSource: "desktop",
-            chromeMediaSourceId: actualSourceId,
+      console.log('System audio requested:', captureSystemAudio);
+
+      const getScreenStream = async (withSystemAudio: boolean) => {
+        return await (navigator.mediaDevices as any).getUserMedia({
+          audio: withSystemAudio ? {
+            mandatory: {
+              chromeMediaSource: "desktop",
+              chromeMediaSourceId: actualSourceId,
+            },
+          } : false,
+          video: {
+            mandatory: {
+              chromeMediaSource: "desktop",
+              chromeMediaSourceId: actualSourceId,
+              maxWidth: TARGET_WIDTH,
+              maxHeight: TARGET_HEIGHT,
+              maxFrameRate: TARGET_FRAME_RATE,
+              minFrameRate: 30,
+            },
           },
-        } : false,
-        video: {
-          mandatory: {
-            chromeMediaSource: "desktop",
-            chromeMediaSourceId: actualSourceId,
-            maxWidth: TARGET_WIDTH,
-            maxHeight: TARGET_HEIGHT,
-            maxFrameRate: TARGET_FRAME_RATE,
-            minFrameRate: 30,
-          },
-        },
-      });
+        });
+      };
+
+      let mediaStream: MediaStream;
+      try {
+        mediaStream = await getScreenStream(captureSystemAudio);
+      } catch (error: any) {
+        // Some macOS setups deny system audio capture even when screen capture is allowed.
+        if (captureSystemAudio && error?.name === 'NotAllowedError') {
+          console.warn('System audio capture denied, retrying without system audio.', error);
+          console.warn('System audio error details:', {
+            name: error?.name,
+            message: error?.message,
+            code: error?.code,
+          });
+          if (!systemAudioPermissionPrompted.current) {
+            systemAudioPermissionPrompted.current = true;
+            const shouldOpen = confirm(
+              '系统音频权限未授权，已改为仅录屏。\n是否现在打开系统设置进行授权？'
+            );
+            if (shouldOpen) {
+              await window.electronAPI?.openScreenRecordingSettings?.();
+            }
+          }
+          mediaStream = await getScreenStream(false);
+        } else {
+          throw error;
+        }
+      }
       stream.current = mediaStream;
+
+      if (captureSystemAudio) {
+        const hasSystemAudio = mediaStream.getAudioTracks().length > 0;
+        const audioTracks = mediaStream.getAudioTracks().map(track => ({
+          id: track.id,
+          label: track.label,
+          kind: track.kind,
+          muted: track.muted,
+          enabled: track.enabled,
+          readyState: track.readyState,
+          settings: track.getSettings?.(),
+        }));
+        console.log('System audio tracks:', audioTracks);
+        console.log('System audio tracks count:', mediaStream.getAudioTracks().length);
+        if (!hasSystemAudio) {
+          if (!systemAudioPermissionPrompted.current) {
+            systemAudioPermissionPrompted.current = true;
+            const shouldOpen = confirm(
+              '系统声音未授权或被系统拒绝，已改为仅录屏。\n是否现在打开系统设置进行授权？'
+            );
+            if (shouldOpen) {
+              await window.electronAPI?.openScreenRecordingSettings?.();
+            }
+          }
+          setSystemAudioSettings(prev => ({ ...prev, enabled: false }));
+        }
+      }
       
       // 如果成功捕获了系统声音，保存引用（用于后续调节音量）
       if (captureSystemAudio && mediaStream.getAudioTracks().length > 0) {

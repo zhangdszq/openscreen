@@ -1460,6 +1460,15 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
       return { success: false, error: String(error) };
     }
   });
+  ipcMain.handle("open-screen-recording-settings", async () => {
+    try {
+      await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to open Screen Recording settings:", error);
+      return { success: false, error: String(error) };
+    }
+  });
   ipcMain.handle("get-asset-base-path", () => {
     try {
       if (app.isPackaged) {
@@ -1887,7 +1896,29 @@ app.on("activate", () => {
     createWindow();
   }
 });
+async function checkScreenCapturePermission() {
+  if (process.platform !== "darwin") return true;
+  const status = systemPreferences.getMediaAccessStatus("screen");
+  console.log("Screen capture permission status:", status);
+  if (status === "granted") {
+    return true;
+  }
+  const result = await dialog.showMessageBox({
+    type: "warning",
+    title: "需要屏幕录制权限",
+    message: "OpenScreen 需要屏幕录制权限才能录制屏幕。",
+    detail: "请在系统设置中授予权限：\n系统设置 → 隐私与安全性 → 屏幕录制 → 启用 Electron/Openscreen",
+    buttons: ["打开系统设置", "稍后"],
+    defaultId: 0
+  });
+  if (result.response === 0) {
+    const { shell: shell2 } = await import("electron");
+    shell2.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+  }
+  return status === "granted";
+}
 app.whenReady().then(async () => {
+  await checkScreenCapturePermission();
   const { ipcMain: ipcMain2 } = await import("electron");
   ipcMain2.on("hud-overlay-close", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {

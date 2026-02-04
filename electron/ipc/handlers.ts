@@ -121,6 +121,16 @@ export function registerIpcHandlers(
     }
   })
 
+  ipcMain.handle('open-screen-recording-settings', async () => {
+    try {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
+      return { success: true }
+    } catch (error) {
+      console.error('Failed to open Screen Recording settings:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
   // Return base path for assets so renderer can resolve file:// paths in production
   ipcMain.handle('get-asset-base-path', () => {
     try {

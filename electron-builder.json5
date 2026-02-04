@@ -35,7 +35,12 @@
       }
     ],
     "icon": "icons/icons/mac/icon.icns",
-    "artifactName": "${productName}-Mac-${arch}-${version}-Installer.${ext}"
+    "artifactName": "${productName}-Mac-${arch}-${version}-Installer.${ext}",
+    "extendInfo": {
+      "NSScreenCaptureUsageDescription": "This app needs access to screen recording to capture your screen",
+      "NSCameraUsageDescription": "This app needs access to the camera for picture-in-picture recording",
+      "NSMicrophoneUsageDescription": "This app needs access to the microphone for audio recording"
+    }
   },
   "linux": {
     "target": [
