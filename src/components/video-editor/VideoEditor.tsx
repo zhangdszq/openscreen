@@ -136,6 +136,18 @@ export default function VideoEditor() {
         const result = await window.electronAPI.getCurrentVideoPath();
         
         if (result.success && result.path) {
+          // First, verify the main video file actually exists
+          const checkFileExists = window.electronAPI.checkFileExists;
+          if (checkFileExists) {
+            const mainVideoExists = await checkFileExists(result.path);
+            console.log('Main video file exists:', mainVideoExists, result.path);
+            if (!mainVideoExists) {
+              setError('Video file not found. Please record a new video.');
+              setLoading(false);
+              return;
+            }
+          }
+          
           const videoUrl = toFileUrl(result.path);
           setVideoPath(videoUrl);
           
@@ -176,7 +188,6 @@ export default function VideoEditor() {
           console.log('Checking for camera video at:', cameraPath);
           try {
             // Check if camera video file actually exists
-            const checkFileExists = window.electronAPI.checkFileExists;
             if (!checkFileExists) {
               console.log('checkFileExists API not available - please restart the app');
             } else {

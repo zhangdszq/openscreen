@@ -16,8 +16,10 @@ interface Region {
 
 export function RegionSelector() {
   const [isSelecting, setIsSelecting] = useState(false);
-  const [startPoint, setStartPoint] = useState({ x: 0, y: 0 });
-  const [currentPoint, setCurrentPoint] = useState({ x: 0, y: 0 });
+  const [startPointScreen, setStartPointScreen] = useState({ x: 0, y: 0 });
+  const [currentPointScreen, setCurrentPointScreen] = useState({ x: 0, y: 0 });
+  const [startPointClient, setStartPointClient] = useState({ x: 0, y: 0 });
+  const [currentPointClient, setCurrentPointClient] = useState({ x: 0, y: 0 });
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -27,26 +29,37 @@ export function RegionSelector() {
     
     if (selectedRegion) return selectedRegion;
     
-    const x = Math.min(startPoint.x, currentPoint.x);
-    const y = Math.min(startPoint.y, currentPoint.y);
-    const width = Math.abs(currentPoint.x - startPoint.x);
-    const height = Math.abs(currentPoint.y - startPoint.y);
+    const x = Math.min(startPointScreen.x, currentPointScreen.x);
+    const y = Math.min(startPointScreen.y, currentPointScreen.y);
+    const width = Math.abs(currentPointScreen.x - startPointScreen.x);
+    const height = Math.abs(currentPointScreen.y - startPointScreen.y);
     
     if (width < 10 || height < 10) return null;
     
     return { x, y, width, height };
-  }, [isSelecting, startPoint, currentPoint, selectedRegion]);
+  }, [isSelecting, startPointScreen, currentPointScreen, selectedRegion]);
 
   const region = getRegion();
 
+  // 使用窗口相对坐标用于显示
+  const displayRegion = (isSelecting || selectedRegion) ? {
+    x: Math.min(startPointClient.x, currentPointClient.x),
+    y: Math.min(startPointClient.y, currentPointClient.y),
+    width: Math.abs(currentPointClient.x - startPointClient.x),
+    height: Math.abs(currentPointClient.y - startPointClient.y),
+  } : null;
+
+  const displayCurrentPoint = currentPointClient;
+
   // Handle mouse down - start selection
+  // 使用 screenX/screenY 获取绝对屏幕坐标，避免窗口偏移问题
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return; // Only left click
     
     // Reset selection if clicking outside the selected region
     if (selectedRegion) {
-      const clickX = e.clientX;
-      const clickY = e.clientY;
+      const clickX = e.screenX;
+      const clickY = e.screenY;
       const isInsideRegion = 
         clickX >= selectedRegion.x && 
         clickX <= selectedRegion.x + selectedRegion.width &&
@@ -59,14 +72,17 @@ export function RegionSelector() {
     }
     
     setIsSelecting(true);
-    setStartPoint({ x: e.clientX, y: e.clientY });
-    setCurrentPoint({ x: e.clientX, y: e.clientY });
+    setStartPointScreen({ x: e.screenX, y: e.screenY });
+    setCurrentPointScreen({ x: e.screenX, y: e.screenY });
+    setStartPointClient({ x: e.clientX, y: e.clientY });
+    setCurrentPointClient({ x: e.clientX, y: e.clientY });
   }, [selectedRegion]);
 
   // Handle mouse move - update selection
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isSelecting) return;
-    setCurrentPoint({ x: e.clientX, y: e.clientY });
+    setCurrentPointScreen({ x: e.screenX, y: e.screenY });
+    setCurrentPointClient({ x: e.clientX, y: e.clientY });
   }, [isSelecting]);
 
   // Handle mouse up - finish selection
@@ -125,16 +141,16 @@ export function RegionSelector() {
       </div>
 
       {/* Selection region */}
-      {region && (
+      {displayRegion && (
         <>
           {/* Clear area (the selected region) */}
           <div
             style={{
               position: 'absolute',
-              left: region.x,
-              top: region.y,
-              width: region.width,
-              height: region.height,
+              left: displayRegion.x,
+              top: displayRegion.y,
+              width: displayRegion.width,
+              height: displayRegion.height,
               backgroundColor: 'transparent',
               boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)',
             }}
@@ -144,10 +160,10 @@ export function RegionSelector() {
           <div
             style={{
               position: 'absolute',
-              left: region.x - 2,
-              top: region.y - 2,
-              width: region.width + 4,
-              height: region.height + 4,
+              left: displayRegion.x - 2,
+              top: displayRegion.y - 2,
+              width: displayRegion.width + 4,
+              height: displayRegion.height + 4,
               border: '2px dashed #fff',
               borderRadius: 4,
               pointerEvents: 'none',
@@ -158,13 +174,13 @@ export function RegionSelector() {
           {selectedRegion && (
             <>
               {/* Top-left */}
-              <div style={{ position: 'absolute', left: region.x - 4, top: region.y - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
+              <div style={{ position: 'absolute', left: displayRegion.x - 4, top: displayRegion.y - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
               {/* Top-right */}
-              <div style={{ position: 'absolute', left: region.x + region.width - 4, top: region.y - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
+              <div style={{ position: 'absolute', left: displayRegion.x + displayRegion.width - 4, top: displayRegion.y - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
               {/* Bottom-left */}
-              <div style={{ position: 'absolute', left: region.x - 4, top: region.y + region.height - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
+              <div style={{ position: 'absolute', left: displayRegion.x - 4, top: displayRegion.y + displayRegion.height - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
               {/* Bottom-right */}
-              <div style={{ position: 'absolute', left: region.x + region.width - 4, top: region.y + region.height - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
+              <div style={{ position: 'absolute', left: displayRegion.x + displayRegion.width - 4, top: displayRegion.y + displayRegion.height - 4, width: 8, height: 8, backgroundColor: '#fff', borderRadius: 2 }} />
             </>
           )}
 
@@ -172,8 +188,8 @@ export function RegionSelector() {
           <div
             style={{
               position: 'absolute',
-              left: region.x + region.width / 2,
-              top: region.y + region.height + 10,
+              left: displayRegion.x + displayRegion.width / 2,
+              top: displayRegion.y + displayRegion.height + 10,
               transform: 'translateX(-50%)',
               backgroundColor: 'rgba(0, 0, 0, 0.8)',
               color: '#fff',
@@ -184,7 +200,7 @@ export function RegionSelector() {
               whiteSpace: 'nowrap',
             }}
           >
-            {Math.round(region.width)} × {Math.round(region.height)}
+            {Math.round(displayRegion.width)} × {Math.round(displayRegion.height)}
           </div>
 
           {/* Confirm/Cancel buttons for selected region */}
@@ -192,8 +208,8 @@ export function RegionSelector() {
             <div
               style={{
                 position: 'absolute',
-                left: region.x + region.width / 2,
-                top: region.y + region.height + 40,
+                left: displayRegion.x + displayRegion.width / 2,
+                top: displayRegion.y + displayRegion.height + 40,
                 transform: 'translateX(-50%)',
                 display: 'flex',
                 gap: 8,
@@ -233,7 +249,7 @@ export function RegionSelector() {
               position: 'absolute',
               left: 0,
               right: 0,
-              top: currentPoint.y,
+              top: displayCurrentPoint.y,
               height: 1,
               backgroundColor: 'rgba(255, 255, 255, 0.3)',
               pointerEvents: 'none',
@@ -245,7 +261,7 @@ export function RegionSelector() {
               position: 'absolute',
               top: 0,
               bottom: 0,
-              left: currentPoint.x,
+              left: displayCurrentPoint.x,
               width: 1,
               backgroundColor: 'rgba(255, 255, 255, 0.3)',
               pointerEvents: 'none',

@@ -66,8 +66,11 @@ const DEFAULT_MICROPHONE_SETTINGS: MicrophoneSettings = {
   deviceId: null,
 };
 
+// macOS 上系统声音录制需要额外权限且体验不佳，默认禁用
+const isMacOS = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
+
 const DEFAULT_SYSTEM_AUDIO_SETTINGS: SystemAudioSettings = {
-  enabled: true, // 系统声音默认开启
+  enabled: !isMacOS, // macOS 默认禁用，其他平台默认开启
   volume: 100,
 };
 
@@ -331,12 +334,14 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       
       let actualSourceId = selectedSource.id;
       let regionCrop: { x: number; y: number; width: number; height: number } | null = null;
+      let absoluteRegion: { x: number; y: number; width: number; height: number } | null = null;
+      let regionDisplayBounds: { x: number; y: number; width: number; height: number } | null = null;
       
       if (isRegionSource) {
         // Parse region coordinates from ID: region:x,y,width,height
         const coords = selectedSource.id.replace('region:', '').split(',').map(Number);
         if (coords.length === 4) {
-          const absoluteRegion = { x: coords[0], y: coords[1], width: coords[2], height: coords[3] };
+          absoluteRegion = { x: coords[0], y: coords[1], width: coords[2], height: coords[3] };
           console.log('Region recording (absolute):', absoluteRegion);
           
           // Get the screen that contains this region
@@ -344,22 +349,9 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
           if (screenResult?.success && screenResult.screenId) {
             actualSourceId = screenResult.screenId;
             console.log('Recording screen for region:', actualSourceId);
-            
-            // Convert absolute coordinates to relative to the display
-            if (screenResult.displayBounds) {
-              regionCrop = {
-                x: absoluteRegion.x - screenResult.displayBounds.x,
-                y: absoluteRegion.y - screenResult.displayBounds.y,
-                width: absoluteRegion.width,
-                height: absoluteRegion.height
-              };
-              console.log('Region relative to display:', regionCrop);
-            } else {
-              regionCrop = absoluteRegion;
-            }
+            regionDisplayBounds = screenResult.displayBounds ?? null;
           } else {
-            // Fallback to primary screen
-            regionCrop = absoluteRegion;
+            // Fallback to primary screen (no scale info)
             const sources = await window.electronAPI.getSources({ types: ['screen'] });
             if (sources.length > 0) {
               actualSourceId = sources[0].id;
@@ -487,6 +479,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       }
 
       let { width = 1920, height = 1080, frameRate = TARGET_FRAME_RATE } = videoTrack.getSettings();
+      const videoPixelWidth = width || 1920;
+      const videoPixelHeight = height || 1080;
 
       // Get source bounds for camera positioning and mouse tracking
       let sourceBounds: { x: number; y: number; width: number; height: number } | null = null;
@@ -517,6 +511,23 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         }
       }
       
+      // Compute region crop in video pixel space after we know actual video size
+      if (absoluteRegion) {
+        if (regionDisplayBounds) {
+          const ratioX = videoPixelWidth / regionDisplayBounds.width;
+          const ratioY = videoPixelHeight / regionDisplayBounds.height;
+          regionCrop = {
+            x: Math.round((absoluteRegion.x - regionDisplayBounds.x) * ratioX),
+            y: Math.round((absoluteRegion.y - regionDisplayBounds.y) * ratioY),
+            width: Math.round(absoluteRegion.width * ratioX),
+            height: Math.round(absoluteRegion.height * ratioY),
+          };
+          console.log('Region relative to display (video scaled):', regionCrop);
+        } else {
+          regionCrop = absoluteRegion;
+        }
+      }
+
       // Ensure dimensions are divisible by 2 for VP9/AV1 codec compatibility
       width = Math.floor(width / 2) * 2;
       height = Math.floor(height / 2) * 2;

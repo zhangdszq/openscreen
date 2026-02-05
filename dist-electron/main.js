@@ -245,9 +245,6 @@ ipcMain.on("hud-overlay-hide", () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
     hudOverlayWindow.minimize();
   }
-  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
-    cameraPreviewWindow.hide();
-  }
 });
 ipcMain.handle("show-teleprompter", () => {
   if (!teleprompterWindow || teleprompterWindow.isDestroyed()) {
@@ -739,6 +736,13 @@ function createEditorWindow() {
   }
   return win;
 }
+ipcMain.handle("get-window-bounds", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    return win.getBounds();
+  }
+  return null;
+});
 ipcMain.handle("open-region-selector", async () => {
   return new Promise((resolve) => {
     regionSelectionResolve = resolve;
@@ -1409,13 +1413,13 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     if (mainWin) {
       mainWin.close();
     }
+    closeCameraPreviewWindow();
     createEditorWindow2();
   });
   ipcMain.handle("store-recorded-video", async (_, videoData, fileName) => {
     try {
       const videoPath = path.join(RECORDINGS_DIR, fileName);
       await fs.writeFile(videoPath, Buffer.from(videoData));
-      currentVideoPath = videoPath;
       return {
         success: true,
         path: videoPath,
@@ -1654,7 +1658,8 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
             return {
               success: true,
               screenId: matchingSource.id,
-              displayBounds: display.bounds
+              displayBounds: display.bounds,
+              scaleFactor: display.scaleFactor
             };
           }
         }
@@ -1665,7 +1670,8 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
         return {
           success: true,
           screenId: sources[0].id,
-          displayBounds: primaryDisplay.bounds
+          displayBounds: primaryDisplay.bounds,
+          scaleFactor: primaryDisplay.scaleFactor
         };
       }
       return { success: false, error: "No screen found for region" };

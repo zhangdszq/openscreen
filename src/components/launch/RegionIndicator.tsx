@@ -112,6 +112,8 @@ export default function RegionIndicator({
   }, []);
 
   const currentBounds = region || bounds;
+  const labelHeight = 32;
+  const padding = 4;
 
   if (!currentBounds) {
     return null;
@@ -126,26 +128,46 @@ export default function RegionIndicator({
         height: '100%',
       }}
     >
-      {/* Dashed border frame - always green */}
-      <div 
+      {/* Dashed border frame - align to actual region */}
+      <div
         className="absolute"
         style={{
-          left: 0,
-          top: 0,
-          width: '100%',
-          height: '100%',
-          border: '2px dashed #22c55e', // Green color
-          borderRadius: '4px',
-          boxSizing: 'border-box',
-          animation: isRecording ? 'pulse-border 2s ease-in-out infinite' : 'marching-ants 1s linear infinite',
+          left: padding,
+          top: labelHeight + padding,
+          width: currentBounds.width,
+          height: currentBounds.height,
+          pointerEvents: 'none',
         }}
-      />
+      >
+        <div
+          style={{
+            position: 'relative',
+            width: '100%',
+            height: '100%',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '100%',
+              height: '100%',
+              border: '2px dashed #22c55e', // Green color
+              borderRadius: '4px',
+              boxSizing: 'border-box',
+              animation: isRecording ? 'pulse-border 2s ease-in-out infinite' : 'marching-ants 1s linear infinite',
+            }}
+          />
 
-      {/* Corner markers - always green */}
-      <CornerMarker position="top-left" color="#22c55e" />
-      <CornerMarker position="top-right" color="#22c55e" />
-      <CornerMarker position="bottom-left" color="#22c55e" />
-      <CornerMarker position="bottom-right" color="#22c55e" />
+          {/* Corner markers - always green */}
+          <CornerMarker position="top-left" color="#22c55e" />
+          <CornerMarker position="top-right" color="#22c55e" />
+          <CornerMarker position="bottom-left" color="#22c55e" />
+          <CornerMarker position="bottom-right" color="#22c55e" />
+        </div>
+      </div>
 
       {/* Top label bar - always green */}
       <div 

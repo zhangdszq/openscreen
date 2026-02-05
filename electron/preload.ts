@@ -164,6 +164,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelRegionSelection: () => {
     return ipcRenderer.invoke('cancel-region-selection')
   },
+  getWindowBounds: () => {
+    return ipcRenderer.invoke('get-window-bounds')
+  },
   saveRegionInfo: (regionInfo: { x: number; y: number; width: number; height: number }, fileName: string) => {
     return ipcRenderer.invoke('save-region-info', regionInfo, fileName)
   },

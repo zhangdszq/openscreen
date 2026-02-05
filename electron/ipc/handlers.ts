@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { RECORDINGS_DIR } from '../main'
 import { startTracking, stopTracking, isCurrentlyTracking, recordClick, checkAccessibilityPermission, requestAccessibilityPermission, type RecordingBounds, type MouseTrackData } from '../mouseTracker'
+import { closeCameraPreviewWindow } from '../windows'
 
 let selectedSource: any = null
 
@@ -57,6 +58,8 @@ export function registerIpcHandlers(
     if (mainWin) {
       mainWin.close()
     }
+    // Close camera preview window when entering editor
+    closeCameraPreviewWindow()
     createEditorWindow()
   })
 
@@ -66,7 +69,8 @@ export function registerIpcHandlers(
     try {
       const videoPath = path.join(RECORDINGS_DIR, fileName)
       await fs.writeFile(videoPath, Buffer.from(videoData))
-      currentVideoPath = videoPath;
+      // Note: Don't set currentVideoPath here - it should only be set via set-current-video-path
+      // to avoid race conditions when camera video is saved after main video
       return {
         success: true,
         path: videoPath,
@@ -352,7 +356,8 @@ export function registerIpcHandlers(
             return { 
               success: true, 
               screenId: matchingSource.id,
-              displayBounds: display.bounds
+              displayBounds: display.bounds,
+              scaleFactor: display.scaleFactor
             };
           }
         }
@@ -365,7 +370,8 @@ export function registerIpcHandlers(
         return { 
           success: true, 
           screenId: sources[0].id,
-          displayBounds: primaryDisplay.bounds
+          displayBounds: primaryDisplay.bounds,
+          scaleFactor: primaryDisplay.scaleFactor
         };
       }
       

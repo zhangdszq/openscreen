@@ -49,10 +49,7 @@ ipcMain.on('hud-overlay-hide', () => {
   if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
     hudOverlayWindow.minimize();
   }
-  // Also hide camera preview when HUD is hidden
-  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
-    cameraPreviewWindow.hide();
-  }
+  // 不再隐藏摄像头预览，让用户在录制时仍能看到摄像头画面
 });
 
 // ============================================================================
@@ -760,6 +757,15 @@ export function createEditorWindow(): BrowserWindow {
 // Region Selector Window
 // ============================================================================
 
+// IPC handler to get current window bounds (for coordinate conversion)
+ipcMain.handle('get-window-bounds', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    return win.getBounds();
+  }
+  return null;
+});
+
 // IPC handler to open region selector
 ipcMain.handle('open-region-selector', async () => {
   return new Promise((resolve) => {
@@ -775,6 +781,7 @@ ipcMain.handle('open-region-selector', async () => {
 });
 
 // IPC handler for confirming region selection
+// 注意：RegionSelector 现在使用 screenX/screenY，传入的 region 已经是绝对屏幕坐标
 ipcMain.handle('confirm-region-selection', (_, region: { x: number; y: number; width: number; height: number }) => {
   if (regionSelectionResolve) {
     regionSelectionResolve(region);

@@ -400,7 +400,7 @@ export const CAMERA_LAYOUT_CONFIGS: CameraLayoutConfig[] = [
  * Get layout config by mode
  */
 export function getLayoutConfig(mode: CameraLayoutMode): CameraLayoutConfig {
-  return CAMERA_LAYOUT_CONFIGS.find(c => c.mode === mode) || CAMERA_LAYOUT_CONFIGS[5]; // default to pip-bottom-right
+  return CAMERA_LAYOUT_CONFIGS.find(c => c.mode === mode) || CAMERA_LAYOUT_CONFIGS[3]; // default to pip-bottom-left
 }
 
 /**
@@ -463,10 +463,10 @@ export interface CameraOverlay {
 export const DEFAULT_CAMERA_OVERLAY: CameraOverlay = {
   enabled: false,
   videoPath: '',
-  position: { x: 0.92, y: 0.88 }, // Bottom-right by default
-  positionPreset: 'bottom-right',
-  layoutMode: 'pip-bottom-right',
-  size: 15, // 15% of video width
+  position: { x: 0.08, y: 0.88 }, // Bottom-left by default
+  positionPreset: 'bottom-left',
+  layoutMode: 'pip-bottom-left',
+  size: 10, // 10% of video width
   splitRatio: 0.3, // 30% for split modes
   cameraScale: 0.9, // 90% camera size in split modes
   screenScale: 0.9, // 90% screen size in split modes
