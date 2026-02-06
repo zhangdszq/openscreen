@@ -1473,6 +1473,18 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
       return { success: false, error: String(error) };
     }
   });
+  ipcMain.handle("get-screen-capture-status", async () => {
+    try {
+      if (process.platform !== "darwin") {
+        return { status: "granted" };
+      }
+      const status = systemPreferences.getMediaAccessStatus("screen");
+      return { status };
+    } catch (error) {
+      console.error("Failed to get screen capture status:", error);
+      return { status: "unknown", error: String(error) };
+    }
+  });
   ipcMain.handle("get-asset-base-path", () => {
     try {
       if (app.isPackaged) {
@@ -1896,6 +1908,13 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   closeCameraPreviewWindow();
   cleanup();
+  if (audioTeeInstance) {
+    try {
+      audioTeeInstance.stop();
+    } catch {
+    }
+    audioTeeInstance = null;
+  }
 });
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -1923,10 +1942,105 @@ async function checkScreenCapturePermission() {
   }
   return status === "granted";
 }
+let audioTeeInstance = null;
+let audioTeeStarted = false;
+function registerSystemAudioIPC() {
+  if (process.platform !== "darwin") return;
+  console.log("[SystemAudio] macOS version:", process.getSystemVersion());
+  console.log("[SystemAudio] Method: native AudioTee (Core Audio Taps)");
+  ipcMain.handle("start-system-audio-capture", async (_event, options) => {
+    try {
+      if (audioTeeStarted && audioTeeInstance) {
+        console.log("[SystemAudio] Already capturing, stopping first...");
+        await audioTeeInstance.stop();
+        audioTeeInstance = null;
+        audioTeeStarted = false;
+      }
+      const { AudioTee } = await import("./index-D6oA_hCw.js");
+      let binaryPath;
+      if (app.isPackaged) {
+        binaryPath = path.join(process.resourcesPath, "audiotee");
+      } else {
+        binaryPath = path.join(process.env.APP_ROOT || "", "node_modules", "audiotee", "bin", "audiotee");
+      }
+      console.log("[SystemAudio] AudioTee binary path:", binaryPath);
+      const sampleRate = (options == null ? void 0 : options.sampleRate) || 48e3;
+      const config = {
+        sampleRate,
+        chunkDurationMs: 100,
+        // 100ms chunks for low latency
+        mute: false
+      };
+      if (binaryPath) {
+        config.binaryPath = binaryPath;
+      }
+      audioTeeInstance = new AudioTee(config);
+      const senderWindow = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+      let dataChunkCount = 0;
+      audioTeeInstance.on("data", (chunk) => {
+        dataChunkCount++;
+        if (dataChunkCount <= 3 || dataChunkCount % 50 === 0) {
+          let maxVal = 0;
+          const view = new Int16Array(chunk.data.buffer, chunk.data.byteOffset, chunk.data.byteLength / 2);
+          for (let i = 0; i < Math.min(view.length, 100); i++) {
+            maxVal = Math.max(maxVal, Math.abs(view[i]));
+          }
+          console.log(`[SystemAudio] Data chunk #${dataChunkCount}: ${chunk.data.byteLength} bytes, maxAmplitude=${maxVal}`);
+        }
+        if (senderWindow && !senderWindow.isDestroyed()) {
+          senderWindow.webContents.send("system-audio-data", chunk.data);
+        }
+      });
+      audioTeeInstance.on("error", (error) => {
+        console.error("[SystemAudio] AudioTee error:", error.message);
+        if (senderWindow && !senderWindow.isDestroyed()) {
+          senderWindow.webContents.send("system-audio-error", error.message);
+        }
+      });
+      audioTeeInstance.on("start", () => {
+        console.log("[SystemAudio] AudioTee capture started");
+      });
+      audioTeeInstance.on("stop", () => {
+        console.log("[SystemAudio] AudioTee capture stopped");
+      });
+      await audioTeeInstance.start();
+      audioTeeStarted = true;
+      console.log("[SystemAudio] AudioTee started at", sampleRate, "Hz");
+      return { success: true, sampleRate };
+    } catch (error) {
+      console.error("[SystemAudio] Failed to start AudioTee:", error);
+      return { success: false, error: error.message || String(error) };
+    }
+  });
+  ipcMain.handle("stop-system-audio-capture", async () => {
+    try {
+      if (audioTeeInstance) {
+        await audioTeeInstance.stop();
+        audioTeeInstance = null;
+        audioTeeStarted = false;
+        console.log("[SystemAudio] AudioTee stopped");
+      }
+      return { success: true };
+    } catch (error) {
+      console.error("[SystemAudio] Failed to stop AudioTee:", error);
+      return { success: false, error: error.message || String(error) };
+    }
+  });
+  ipcMain.handle("test-system-audio", async () => {
+    return {
+      platform: process.platform,
+      macosVersion: process.getSystemVersion(),
+      electronVersion: process.versions.electron,
+      screenPermission: systemPreferences.getMediaAccessStatus("screen"),
+      audioTeeStarted,
+      method: "native-audiotee"
+    };
+  });
+}
 app.whenReady().then(async () => {
   await checkScreenCapturePermission();
-  const { ipcMain: ipcMain2 } = await import("electron");
-  ipcMain2.on("hud-overlay-close", () => {
+  registerSystemAudioIPC();
+  ipcMain.on("hud-overlay-close", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.hide();
     }
@@ -1952,6 +2066,20 @@ app.whenReady().then(async () => {
     }
   );
   createWindow();
+  const forwardRendererLogs = (win) => {
+    if (!win || win.isDestroyed()) return;
+    win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      if (message.includes("SystemAudio") || message.includes("loopback") || message.includes("system audio")) {
+        const prefix = ["[V]", "[I]", "[W]", "[E]"][level] || "[?]";
+        const src = sourceId ? sourceId.split("/").pop() : "";
+        console.log(`[Renderer${prefix}] ${src}:${line} ${message}`);
+      }
+    });
+  };
+  if (mainWindow) forwardRendererLogs(mainWindow);
+  app.on("browser-window-created", (_event, win) => {
+    forwardRendererLogs(win);
+  });
 });
 export {
   MAIN_DIST,

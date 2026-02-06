@@ -62,7 +62,7 @@ const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
 };
 
 const DEFAULT_MICROPHONE_SETTINGS: MicrophoneSettings = {
-  enabled: false,
+  enabled: false, // 麦克风默认关闭，用户需手动开启
   deviceId: null,
 };
 
@@ -70,7 +70,7 @@ const DEFAULT_MICROPHONE_SETTINGS: MicrophoneSettings = {
 const isMacOS = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
 const DEFAULT_SYSTEM_AUDIO_SETTINGS: SystemAudioSettings = {
-  enabled: !isMacOS, // macOS 默认禁用，其他平台默认开启
+  enabled: true, // 默认开启系统声音录制
   volume: 100,
 };
 
@@ -92,6 +92,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
   const recordingTimestamp = useRef<number>(0);
   const recordingBounds = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const systemAudioPermissionPrompted = useRef(false);
+  const loopbackEnabledRef = useRef(false);
+  const systemAudioContextRef = useRef<AudioContext | null>(null);
   
   // Camera separate recording
   const cameraRecorder = useRef<MediaRecorder | null>(null);
@@ -256,6 +258,22 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         systemAudioStream.current.getTracks().forEach(track => track.stop());
         systemAudioStream.current = null;
       }
+
+      // Stop native audio capture if it was enabled
+      if (loopbackEnabledRef.current) {
+        window.electronAPI?.stopSystemAudioCapture?.();
+        loopbackEnabledRef.current = false;
+      }
+      // Close audio context used for system audio
+      if (systemAudioContextRef.current) {
+        try {
+          const ctx = systemAudioContextRef.current as any;
+          if (ctx.__cleanup) ctx.__cleanup();
+          if (ctx.__oscillator) ctx.__oscillator.stop();
+          ctx.close();
+        } catch {}
+        systemAudioContextRef.current = null;
+      }
       
       // Stop camera recording
       if (cameraRecorder.current?.state === "recording") {
@@ -312,6 +330,19 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         systemAudioStream.current.getTracks().forEach(track => track.stop());
         systemAudioStream.current = null;
       }
+      if (loopbackEnabledRef.current) {
+        window.electronAPI?.stopSystemAudioCapture?.();
+        loopbackEnabledRef.current = false;
+      }
+      if (systemAudioContextRef.current) {
+        try {
+          const ctx = systemAudioContextRef.current as any;
+          if (ctx.__cleanup) ctx.__cleanup();
+          if (ctx.__oscillator) ctx.__oscillator.stop();
+          ctx.close();
+        } catch {}
+        systemAudioContextRef.current = null;
+      }
       if (cameraStream.current) {
         cameraStream.current.getTracks().forEach(track => track.stop());
         cameraStream.current = null;
@@ -366,14 +397,10 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       const captureSystemAudio = systemAudioSettings.enabled && actualSourceId;
       console.log('System audio requested:', captureSystemAudio);
 
-      const getScreenStream = async (withSystemAudio: boolean) => {
+      // Get video stream using getUserMedia (more reliable for source selection)
+      const getVideoStream = async () => {
         return await (navigator.mediaDevices as any).getUserMedia({
-          audio: withSystemAudio ? {
-            mandatory: {
-              chromeMediaSource: "desktop",
-              chromeMediaSourceId: actualSourceId,
-            },
-          } : false,
+          audio: false,
           video: {
             mandatory: {
               chromeMediaSource: "desktop",
@@ -387,58 +414,310 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         });
       };
 
-      let mediaStream: MediaStream;
-      try {
-        mediaStream = await getScreenStream(captureSystemAudio);
-      } catch (error: any) {
-        // Some macOS setups deny system audio capture even when screen capture is allowed.
-        if (captureSystemAudio && error?.name === 'NotAllowedError') {
-          console.warn('System audio capture denied, retrying without system audio.', error);
-          console.warn('System audio error details:', {
-            name: error?.name,
-            message: error?.message,
-            code: error?.code,
+      // Get system audio via native AudioTee (Core Audio Taps)
+      // Flow: start AudioTee → receive PCM chunks via IPC → pipe into AudioWorklet → MediaStream
+      const getSystemAudioStream = async (): Promise<MediaStream | null> => {
+        try {
+          const SAMPLE_RATE = 48000;
+          console.log('[SystemAudio] Starting native AudioTee capture...');
+          
+          // Step A: Start native audio capture in main process
+          const result = await window.electronAPI?.startSystemAudioCapture?.({ sampleRate: SAMPLE_RATE });
+          console.log('[SystemAudio] startSystemAudioCapture result:', JSON.stringify(result));
+          
+          if (!result?.success) {
+            console.error('[SystemAudio] Failed to start AudioTee:', result?.error);
+            return null;
+          }
+          
+          loopbackEnabledRef.current = true; // track that we need to stop it later
+          
+          // Step B: Create AudioContext and a ScriptProcessor to inject PCM data
+          const audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+          
+          // Create a MediaStream destination (this is what we'll record from)
+          const dest = audioContext.createMediaStreamDestination();
+          
+          // Create an oscillator as a dummy source (required to keep ScriptProcessor alive)
+          const oscillator = audioContext.createOscillator();
+          const inputGain = audioContext.createGain();
+          inputGain.gain.value = 0; // mute the oscillator — it's just a clock signal
+          oscillator.connect(inputGain);
+          
+          // ScriptProcessor to inject PCM data from AudioTee
+          // Buffer size 4096 at 48kHz = ~85ms per callback
+          const scriptNode = audioContext.createScriptProcessor(4096, 1, 1);
+          const pcmQueue: Float32Array[] = [];
+          let queueOffset = 0;
+          
+          scriptNode.onaudioprocess = (e) => {
+            const output = e.outputBuffer.getChannelData(0);
+            let written = 0;
+            
+            while (written < output.length && pcmQueue.length > 0) {
+              const chunk = pcmQueue[0];
+              const available = chunk.length - queueOffset;
+              const needed = output.length - written;
+              const toCopy = Math.min(available, needed);
+              
+              output.set(chunk.subarray(queueOffset, queueOffset + toCopy), written);
+              written += toCopy;
+              queueOffset += toCopy;
+              
+              if (queueOffset >= chunk.length) {
+                pcmQueue.shift();
+                queueOffset = 0;
+              }
+            }
+            
+            // Fill remaining with silence
+            if (written < output.length) {
+              output.fill(0, written);
+            }
+          };
+          
+          // Connect: oscillator → inputGain(muted) → scriptProcessor → dest (recording only)
+          inputGain.connect(scriptNode);
+          scriptNode.connect(dest);
+          
+          // IMPORTANT: Also connect to destination via a MUTED gain node
+          // ScriptProcessor won't fire onaudioprocess unless connected to destination
+          const muteGain = audioContext.createGain();
+          muteGain.gain.value = 0; // completely silent — prevents feedback loop
+          scriptNode.connect(muteGain);
+          muteGain.connect(audioContext.destination);
+          
+          oscillator.start();
+          
+          // Step C: Listen for PCM data from main process
+          let rendererChunkCount = 0;
+          const cleanup = window.electronAPI?.onSystemAudioData?.((data: any) => {
+            rendererChunkCount++;
+            
+            // Convert IPC data to proper typed array
+            let int16: Int16Array;
+            if (data instanceof ArrayBuffer) {
+              int16 = new Int16Array(data);
+            } else if (data?.buffer) {
+              int16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
+            } else if (ArrayBuffer.isView(data)) {
+              int16 = new Int16Array((data as any).buffer);
+            } else {
+              // Fallback: try to create from raw data
+              const uint8 = new Uint8Array(data);
+              int16 = new Int16Array(uint8.buffer);
+            }
+            
+            if (rendererChunkCount <= 3 || rendererChunkCount % 50 === 0) {
+              let maxVal = 0;
+              for (let i = 0; i < Math.min(int16.length, 100); i++) {
+                maxVal = Math.max(maxVal, Math.abs(int16[i]));
+              }
+              console.log(`[SystemAudio] Renderer chunk #${rendererChunkCount}: ${int16.length} samples, maxAmp=${maxVal}, dataType=${typeof data}, isArrayBuffer=${data instanceof ArrayBuffer}`);
+            }
+            
+            // Convert Int16 to Float32 for Web Audio
+            const float32 = new Float32Array(int16.length);
+            for (let i = 0; i < int16.length; i++) {
+              float32[i] = int16[i] / 32768;
+            }
+            pcmQueue.push(float32);
+            
+            // Keep queue bounded (max ~1 second of audio)
+            while (pcmQueue.length > 10) {
+              pcmQueue.shift();
+              queueOffset = 0;
+            }
           });
-          if (!systemAudioPermissionPrompted.current) {
-            systemAudioPermissionPrompted.current = true;
-            const shouldOpen = confirm(
-              '系统音频权限未授权，已改为仅录屏。\n是否现在打开系统设置进行授权？'
-            );
-            if (shouldOpen) {
-              await window.electronAPI?.openScreenRecordingSettings?.();
+          
+          // Store cleanup refs for later
+          (audioContext as any).__cleanup = cleanup;
+          (audioContext as any).__oscillator = oscillator;
+          (audioContext as any).__scriptNode = scriptNode;
+          
+          // Wait a bit for first chunks to arrive
+          await new Promise(r => setTimeout(r, 300));
+          
+          const audioTrack = dest.stream.getAudioTracks()[0];
+          console.log('[SystemAudio] Native audio track:', audioTrack?.label, 'state:', audioTrack?.readyState);
+          
+          if (audioTrack && audioTrack.readyState === 'live') {
+            console.log('[SystemAudio] ✓ Got LIVE native audio track!');
+            // Store audioContext ref so we can clean up later
+            systemAudioContextRef.current = audioContext;
+            return dest.stream;
+          }
+          
+          console.warn('[SystemAudio] ✗ Native audio track not live');
+          audioContext.close();
+          if (cleanup) cleanup();
+          await window.electronAPI?.stopSystemAudioCapture?.();
+          loopbackEnabledRef.current = false;
+          return null;
+        } catch (error) {
+          console.error('[SystemAudio] ✗ Native audio capture error:', error);
+          if (loopbackEnabledRef.current) {
+            await window.electronAPI?.stopSystemAudioCapture?.();
+            loopbackEnabledRef.current = false;
+          }
+          return null;
+        }
+      };
+
+      // Fallback for non-macOS: try getUserMedia with desktop audio
+      const getDesktopAudioStream = async (): Promise<MediaStream | null> => {
+        try {
+          console.log('[SystemAudio] Trying getUserMedia desktop audio (non-macOS)');
+          const stream = await (navigator.mediaDevices as any).getUserMedia({
+            audio: {
+              mandatory: {
+                chromeMediaSource: "desktop",
+                chromeMediaSourceId: actualSourceId,
+              },
+            },
+            video: false,
+          });
+          
+          const audioTracks = stream.getAudioTracks();
+          if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
+            console.log('[SystemAudio] Got desktop audio via getUserMedia');
+            return stream;
+          }
+          return null;
+        } catch (error) {
+          console.warn('[SystemAudio] getUserMedia desktop audio failed:', error);
+          return null;
+        }
+      };
+
+      let mediaStream: MediaStream;
+      let systemAudioTrack: MediaStreamTrack | null = null;
+      let pendingSystemAudioStream: MediaStream | null = null;
+      const shouldPromptSystemAudioPermission = async () => {
+        try {
+          const statusResult = await window.electronAPI?.getScreenCaptureStatus?.();
+          const status = statusResult?.status;
+          console.log('[SystemAudio] Screen capture permission status:', status);
+          if (status === 'granted') {
+            return false;
+          }
+          // Only prompt for explicit non-granted states
+          if (status === 'denied' || status === 'not-determined' || status === 'restricted') {
+            return true;
+          }
+          // Unknown or missing status: avoid prompting to reduce false positives
+          return false;
+        } catch (error) {
+          console.warn('[SystemAudio] Failed to get screen capture status:', error);
+          return false;
+        }
+      };
+      
+      try {
+        // Step 1: Get system audio first on macOS (avoid parallel capture sessions)
+        if (captureSystemAudio && isMacOS) {
+          console.log('[SystemAudio] Attempting to capture system audio (macOS, first)...');
+          pendingSystemAudioStream = await getSystemAudioStream();
+          if (!pendingSystemAudioStream) {
+            console.warn('[SystemAudio] Could not get system audio (macOS)');
+            if (!systemAudioPermissionPrompted.current) {
+              const shouldPrompt = await shouldPromptSystemAudioPermission();
+              if (shouldPrompt) {
+                systemAudioPermissionPrompted.current = true;
+                const shouldOpen = confirm(
+                  '无法捕获系统声音。这可能是因为：\n' +
+                  '1. 需要授予"屏幕与系统录音"权限\n' +
+                  '2. 授权后需要完全重启应用\n\n' +
+                  '是否打开系统设置？'
+                );
+                if (shouldOpen) {
+                  await window.electronAPI?.openScreenRecordingSettings?.();
+                }
+              } else {
+                console.warn('[SystemAudio] Permission is granted but audio not available.');
+              }
             }
           }
-          mediaStream = await getScreenStream(false);
-        } else {
-          throw error;
         }
+
+        // Step 2: Get video stream
+        console.log('[SystemAudio] Getting video stream...');
+        mediaStream = await getVideoStream();
+        console.log('[SystemAudio] Video stream obtained');
+        
+        // Step 3: Try to get system audio if requested (non-macOS or if not already attempted)
+        if (captureSystemAudio && !isMacOS) {
+          console.log('[SystemAudio] Attempting to capture system audio (non-macOS)...');
+          
+          // Try getDisplayMedia first (macOS loopback)
+          let audioStream = await getSystemAudioStream();
+          
+          // If that failed, try getUserMedia (Windows/Linux)
+          if (!audioStream) {
+            audioStream = await getDesktopAudioStream();
+          }
+          pendingSystemAudioStream = audioStream;
+        }
+
+        if (captureSystemAudio && pendingSystemAudioStream) {
+          const audioTrack = pendingSystemAudioStream.getAudioTracks()[0];
+          if (audioTrack && audioTrack.readyState === 'live') {
+            mediaStream.addTrack(audioTrack);
+            systemAudioTrack = audioTrack;
+            console.log('[SystemAudio] System audio track added to stream');
+          } else {
+            console.warn('[SystemAudio] Pending audio track not live:', audioTrack?.readyState);
+          }
+        }
+      } catch (error: any) {
+        console.error('[SystemAudio] Error getting streams:', error);
+        throw error;
       }
       stream.current = mediaStream;
 
       if (captureSystemAudio) {
-        const hasSystemAudio = mediaStream.getAudioTracks().length > 0;
-        const audioTracks = mediaStream.getAudioTracks().map(track => ({
-          id: track.id,
-          label: track.label,
-          kind: track.kind,
-          muted: track.muted,
-          enabled: track.enabled,
-          readyState: track.readyState,
-          settings: track.getSettings?.(),
-        }));
-        console.log('System audio tracks:', audioTracks);
-        console.log('System audio tracks count:', mediaStream.getAudioTracks().length);
-        if (!hasSystemAudio) {
+        const audioTracks = mediaStream.getAudioTracks();
+        const hasSystemAudio = audioTracks.length > 0;
+        // Check if audio track is actually live (not ended)
+        const hasLiveAudio = hasSystemAudio && audioTracks.some(track => track.readyState === 'live');
+        
+        console.log('[SystemAudio] Audio track check:');
+        audioTracks.forEach((track, i) => {
+          console.log(`[SystemAudio]   Track ${i}:`, {
+            id: track.id,
+            label: track.label,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+            settings: track.getSettings?.(),
+          });
+        });
+        console.log('[SystemAudio] Has audio tracks:', hasSystemAudio);
+        console.log('[SystemAudio] Has LIVE audio tracks:', hasLiveAudio);
+        
+        if (!hasLiveAudio) {
+          console.warn('[SystemAudio] No live audio tracks available!');
           if (!systemAudioPermissionPrompted.current) {
-            systemAudioPermissionPrompted.current = true;
-            const shouldOpen = confirm(
-              '系统声音未授权或被系统拒绝，已改为仅录屏。\n是否现在打开系统设置进行授权？'
-            );
-            if (shouldOpen) {
-              await window.electronAPI?.openScreenRecordingSettings?.();
+            const shouldPrompt = await shouldPromptSystemAudioPermission();
+            if (shouldPrompt) {
+              systemAudioPermissionPrompted.current = true;
+              const shouldOpen = confirm(
+                '系统声音未授权或被系统拒绝，已改为仅录屏。\n是否现在打开系统设置进行授权？'
+              );
+              if (shouldOpen) {
+                await window.electronAPI?.openScreenRecordingSettings?.();
+              }
+            } else {
+              console.warn('[SystemAudio] Permission is granted but audio track not live.');
             }
           }
           setSystemAudioSettings(prev => ({ ...prev, enabled: false }));
+          // Remove dead audio tracks
+          audioTracks.forEach(track => {
+            if (track.readyState === 'ended') {
+              mediaStream.removeTrack(track);
+            }
+          });
         }
       }
       
@@ -606,6 +885,19 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       }
 
       const hasAudio = recordingStream.getAudioTracks().length > 0;
+      console.log('[SystemAudio] Final recording stream before MediaRecorder:');
+      console.log('[SystemAudio]   - Video tracks:', recordingStream.getVideoTracks().length);
+      console.log('[SystemAudio]   - Audio tracks:', recordingStream.getAudioTracks().length);
+      if (hasAudio) {
+        recordingStream.getAudioTracks().forEach((track, i) => {
+          console.log(`[SystemAudio]   - Audio track ${i}:`, {
+            label: track.label,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+          });
+        });
+      }
       console.log(
         `Recording at ${width}x${height} @ ${frameRate ?? TARGET_FRAME_RATE}fps using ${mimeType} / ${Math.round(
           videoBitsPerSecond / 1_000_000
@@ -623,6 +915,10 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         if (e.data && e.data.size > 0) chunks.current.push(e.data);
       };
       recorder.onstop = async () => {
+        console.log('[SystemAudio] MediaRecorder stopped');
+        console.log('[SystemAudio] Chunks collected:', chunks.current.length);
+        console.log('[SystemAudio] Total size:', chunks.current.reduce((acc, chunk) => acc + chunk.size, 0), 'bytes');
+        
         stream.current = null;
         
         // Stop mouse tracking and get the data

@@ -62,6 +62,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openScreenRecordingSettings: () => {
     return ipcRenderer.invoke('open-screen-recording-settings')
   },
+  getScreenCaptureStatus: () => {
+    return ipcRenderer.invoke('get-screen-capture-status')
+  },
   saveExportedVideo: (videoData: ArrayBuffer, fileName: string) => {
     return ipcRenderer.invoke('save-exported-video', videoData, fileName)
   },
@@ -283,5 +286,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   deleteFlowGraph: (filePath: string) => {
     return ipcRenderer.invoke('delete-flow-graph', filePath)
+  },
+
+  // System Audio Capture APIs (native AudioTee for macOS)
+  startSystemAudioCapture: (options?: { sampleRate?: number }) => {
+    return ipcRenderer.invoke('start-system-audio-capture', options)
+  },
+  stopSystemAudioCapture: () => {
+    return ipcRenderer.invoke('stop-system-audio-capture')
+  },
+  onSystemAudioData: (callback: (data: Buffer) => void) => {
+    const listener = (_: any, data: Buffer) => callback(data)
+    ipcRenderer.on('system-audio-data', listener)
+    return () => ipcRenderer.removeListener('system-audio-data', listener)
+  },
+  onSystemAudioError: (callback: (error: string) => void) => {
+    const listener = (_: any, error: string) => callback(error)
+    ipcRenderer.on('system-audio-error', listener)
+    return () => ipcRenderer.removeListener('system-audio-error', listener)
+  },
+  testSystemAudio: () => {
+    return ipcRenderer.invoke('test-system-audio')
   },
 })

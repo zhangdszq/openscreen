@@ -1,9 +1,9 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, systemPreferences, dialog } from 'electron'
+import { app, BrowserWindow, Tray, Menu, nativeImage, systemPreferences, dialog, session, screen, desktopCapturer, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, closeCameraPreviewWindow, showCameraPreviewWindowIfExists, hideCameraPreviewWindow } from './windows'
-import { registerIpcHandlers } from './ipc/handlers'
+import { registerIpcHandlers, getSelectedSource } from './ipc/handlers'
 import { cleanup as cleanupMouseTracker } from './mouseTracker'
 
 
@@ -39,6 +39,10 @@ export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+
+// ============================================================
+// macOS System Audio via AudioTee (native Core Audio Taps)
+// ============================================================
 
 // Window references
 let mainWindow: BrowserWindow | null = null
@@ -146,6 +150,11 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   closeCameraPreviewWindow();
   cleanupMouseTracker();
+  // Stop audio capture on quit
+  if (audioTeeInstance) {
+    try { audioTeeInstance.stop() } catch {}
+    audioTeeInstance = null
+  }
 })
 
 app.on('activate', () => {
@@ -156,8 +165,6 @@ app.on('activate', () => {
   }
 })
 
-
-
 // Check and request screen recording permission on macOS
 async function checkScreenCapturePermission(): Promise<boolean> {
   if (process.platform !== 'darwin') return true;
@@ -165,6 +172,7 @@ async function checkScreenCapturePermission(): Promise<boolean> {
   const status = systemPreferences.getMediaAccessStatus('screen');
   console.log('Screen capture permission status:', status);
   
+  // @ts-ignore
   if (status === 'granted') {
     return true;
   }
@@ -180,12 +188,135 @@ async function checkScreenCapturePermission(): Promise<boolean> {
   });
   
   if (result.response === 0) {
-    // Open System Preferences to Screen Recording
     const { shell } = await import('electron');
     shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
   }
   
+  // @ts-ignore
   return status === 'granted';
+}
+
+// ============================================================
+// Native System Audio Capture via AudioTee
+// Uses Core Audio Taps API (macOS 14.2+) — bypasses broken Electron loopback
+// ============================================================
+let audioTeeInstance: any = null
+let audioTeeStarted = false
+
+function registerSystemAudioIPC() {
+  if (process.platform !== 'darwin') return
+
+  console.log('[SystemAudio] macOS version:', process.getSystemVersion())
+  console.log('[SystemAudio] Method: native AudioTee (Core Audio Taps)')
+
+  // Start capturing system audio and stream PCM data to renderer
+  ipcMain.handle('start-system-audio-capture', async (_event, options?: { sampleRate?: number }) => {
+    try {
+      if (audioTeeStarted && audioTeeInstance) {
+        console.log('[SystemAudio] Already capturing, stopping first...')
+        await audioTeeInstance.stop()
+        audioTeeInstance = null
+        audioTeeStarted = false
+      }
+
+      const { AudioTee } = await import('audiotee')
+
+      // Resolve binary path — works in dev and packaged builds
+      let binaryPath: string | undefined
+      if (app.isPackaged) {
+        binaryPath = path.join(process.resourcesPath, 'audiotee')
+      } else {
+        // Dev mode: binary is in node_modules
+        binaryPath = path.join(process.env.APP_ROOT || '', 'node_modules', 'audiotee', 'bin', 'audiotee')
+      }
+      console.log('[SystemAudio] AudioTee binary path:', binaryPath)
+
+      const sampleRate = options?.sampleRate || 48000
+      const config: any = {
+        sampleRate,
+        chunkDurationMs: 100, // 100ms chunks for low latency
+        mute: false,
+      }
+      if (binaryPath) {
+        config.binaryPath = binaryPath
+      }
+
+      audioTeeInstance = new AudioTee(config)
+
+      // Find the sender window to stream data to
+      const senderWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+
+      let dataChunkCount = 0
+      audioTeeInstance.on('data', (chunk: { data: Buffer }) => {
+        dataChunkCount++
+        // Log first few chunks and then every 50th
+        if (dataChunkCount <= 3 || dataChunkCount % 50 === 0) {
+          // Check if audio is silent (all zeros)
+          let maxVal = 0
+          const view = new Int16Array(chunk.data.buffer, chunk.data.byteOffset, chunk.data.byteLength / 2)
+          for (let i = 0; i < Math.min(view.length, 100); i++) {
+            maxVal = Math.max(maxVal, Math.abs(view[i]))
+          }
+          console.log(`[SystemAudio] Data chunk #${dataChunkCount}: ${chunk.data.byteLength} bytes, maxAmplitude=${maxVal}`)
+        }
+        if (senderWindow && !senderWindow.isDestroyed()) {
+          senderWindow.webContents.send('system-audio-data', chunk.data)
+        }
+      })
+
+      audioTeeInstance.on('error', (error: Error) => {
+        console.error('[SystemAudio] AudioTee error:', error.message)
+        if (senderWindow && !senderWindow.isDestroyed()) {
+          senderWindow.webContents.send('system-audio-error', error.message)
+        }
+      })
+
+      audioTeeInstance.on('start', () => {
+        console.log('[SystemAudio] AudioTee capture started')
+      })
+
+      audioTeeInstance.on('stop', () => {
+        console.log('[SystemAudio] AudioTee capture stopped')
+      })
+
+      await audioTeeInstance.start()
+      audioTeeStarted = true
+
+      console.log('[SystemAudio] AudioTee started at', sampleRate, 'Hz')
+      return { success: true, sampleRate }
+    } catch (error: any) {
+      console.error('[SystemAudio] Failed to start AudioTee:', error)
+      return { success: false, error: error.message || String(error) }
+    }
+  })
+
+  // Stop capturing
+  ipcMain.handle('stop-system-audio-capture', async () => {
+    try {
+      if (audioTeeInstance) {
+        await audioTeeInstance.stop()
+        audioTeeInstance = null
+        audioTeeStarted = false
+        console.log('[SystemAudio] AudioTee stopped')
+      }
+      return { success: true }
+    } catch (error: any) {
+      console.error('[SystemAudio] Failed to stop AudioTee:', error)
+      return { success: false, error: error.message || String(error) }
+    }
+  })
+
+  // Diagnostic
+  ipcMain.handle('test-system-audio', async () => {
+    return {
+      platform: process.platform,
+      macosVersion: process.getSystemVersion(),
+      electronVersion: process.versions.electron,
+      screenPermission: systemPreferences.getMediaAccessStatus('screen'),
+      audioTeeStarted,
+      method: 'native-audiotee',
+    }
+  })
 }
 
 // Register all IPC handlers when app is ready
@@ -193,8 +324,10 @@ app.whenReady().then(async () => {
     // Check screen capture permission first
     await checkScreenCapturePermission();
     
+    // Register native system audio capture IPC
+    registerSystemAudioIPC()
+    
     // Listen for HUD overlay close event - hide to tray instead of quitting
-    const { ipcMain } = await import('electron');
     ipcMain.on('hud-overlay-close', () => {
       // Hide windows instead of quitting - go to tray mode
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -224,4 +357,20 @@ app.whenReady().then(async () => {
     }
   )
   createWindow()
+
+  // Forward renderer console logs to main process stdout for debugging
+  const forwardRendererLogs = (win: BrowserWindow | null) => {
+    if (!win || win.isDestroyed()) return
+    win.webContents.on('console-message', (_event: any, level: number, message: string, line: number, sourceId: string) => {
+      if (message.includes('SystemAudio') || message.includes('loopback') || message.includes('system audio')) {
+        const prefix = ['[V]', '[I]', '[W]', '[E]'][level] || '[?]'
+        const src = sourceId ? sourceId.split('/').pop() : ''
+        console.log(`[Renderer${prefix}] ${src}:${line} ${message}`)
+      }
+    })
+  }
+  if (mainWindow) forwardRendererLogs(mainWindow)
+  app.on('browser-window-created', (_event, win) => {
+    forwardRendererLogs(win)
+  })
 })

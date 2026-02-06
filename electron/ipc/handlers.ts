@@ -1,4 +1,4 @@
-import { ipcMain, desktopCapturer, BrowserWindow, shell, app, dialog } from 'electron'
+import { ipcMain, desktopCapturer, BrowserWindow, shell, app, dialog, systemPreferences } from 'electron'
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -7,6 +7,10 @@ import { startTracking, stopTracking, isCurrentlyTracking, recordClick, checkAcc
 import { closeCameraPreviewWindow } from '../windows'
 
 let selectedSource: any = null
+
+export function getSelectedSource() {
+  return selectedSource;
+}
 
 export function registerIpcHandlers(
   createEditorWindow: () => void,
@@ -132,6 +136,19 @@ export function registerIpcHandlers(
     } catch (error) {
       console.error('Failed to open Screen Recording settings:', error)
       return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('get-screen-capture-status', async () => {
+    try {
+      if (process.platform !== 'darwin') {
+        return { status: 'granted' }
+      }
+      const status = systemPreferences.getMediaAccessStatus('screen')
+      return { status }
+    } catch (error) {
+      console.error('Failed to get screen capture status:', error)
+      return { status: 'unknown', error: String(error) }
     }
   })
 

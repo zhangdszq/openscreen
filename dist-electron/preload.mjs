@@ -58,6 +58,9 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   openScreenRecordingSettings: () => {
     return electron.ipcRenderer.invoke("open-screen-recording-settings");
   },
+  getScreenCaptureStatus: () => {
+    return electron.ipcRenderer.invoke("get-screen-capture-status");
+  },
   saveExportedVideo: (videoData, fileName) => {
     return electron.ipcRenderer.invoke("save-exported-video", videoData, fileName);
   },
@@ -263,5 +266,25 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   deleteFlowGraph: (filePath) => {
     return electron.ipcRenderer.invoke("delete-flow-graph", filePath);
+  },
+  // System Audio Capture APIs (native AudioTee for macOS)
+  startSystemAudioCapture: (options) => {
+    return electron.ipcRenderer.invoke("start-system-audio-capture", options);
+  },
+  stopSystemAudioCapture: () => {
+    return electron.ipcRenderer.invoke("stop-system-audio-capture");
+  },
+  onSystemAudioData: (callback) => {
+    const listener = (_, data) => callback(data);
+    electron.ipcRenderer.on("system-audio-data", listener);
+    return () => electron.ipcRenderer.removeListener("system-audio-data", listener);
+  },
+  onSystemAudioError: (callback) => {
+    const listener = (_, error) => callback(error);
+    electron.ipcRenderer.on("system-audio-error", listener);
+    return () => electron.ipcRenderer.removeListener("system-audio-error", listener);
+  },
+  testSystemAudio: () => {
+    return electron.ipcRenderer.invoke("test-system-audio");
   }
 });
