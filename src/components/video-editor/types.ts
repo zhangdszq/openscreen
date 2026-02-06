@@ -11,6 +11,13 @@ export interface ZoomRegion {
   endMs: number;
   depth: ZoomDepth;
   focus: ZoomFocus;
+  /** Custom zoom scale that overrides the depth-based scale. Set when user resizes the zoom rectangle. */
+  customScale?: number;
+}
+
+/** Get the effective zoom scale for a region: customScale if set, otherwise ZOOM_DEPTH_SCALES[depth] */
+export function getRegionZoomScale(region: ZoomRegion): number {
+  return region.customScale ?? ZOOM_DEPTH_SCALES[region.depth];
 }
 
 export interface TrimRegion {

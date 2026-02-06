@@ -406,12 +406,27 @@ export default function VideoEditor() {
           ? {
               ...region,
               depth,
+              customScale: undefined, // Reset custom scale when depth preset is chosen
               focus: clampFocusToDepth(region.focus, depth),
             }
           : region,
       ),
     );
   }, [selectedZoomId]);
+
+  const handleZoomScaleChange = useCallback((id: string, scale: number, focus: ZoomFocus) => {
+    setZoomRegions((prev) =>
+      prev.map((region) =>
+        region.id === id
+          ? {
+              ...region,
+              customScale: scale,
+              focus,
+            }
+          : region,
+      ),
+    );
+  }, []);
 
   const handleZoomDelete = useCallback((id: string) => {
     setZoomRegions((prev) => prev.filter((region) => region.id !== id));
@@ -1308,6 +1323,7 @@ export default function VideoEditor() {
                               selectedZoomId={selectedZoomId}
                               onSelectZoom={handleSelectZoom}
                               onZoomFocusChange={handleZoomFocusChange}
+                              onZoomScaleChange={handleZoomScaleChange}
                               isPlaying={isPlaying}
                               showShadow={shadowIntensity > 0}
                               shadowIntensity={shadowIntensity}
@@ -1419,6 +1435,7 @@ export default function VideoEditor() {
                           selectedZoomId={selectedZoomId}
                           onSelectZoom={handleSelectZoom}
                           onZoomFocusChange={handleZoomFocusChange}
+                          onZoomScaleChange={handleZoomScaleChange}
                           isPlaying={isPlaying}
                           showShadow={shadowIntensity > 0}
                           shadowIntensity={shadowIntensity}

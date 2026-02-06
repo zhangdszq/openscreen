@@ -1,10 +1,10 @@
 import { Application, Container, Sprite, Graphics, BlurFilter, Texture } from 'pixi.js';
 import type { ZoomRegion, CropRegion, AnnotationRegion } from '@/components/video-editor/types';
-import { ZOOM_DEPTH_SCALES } from '@/components/video-editor/types';
+import { getRegionZoomScale } from '@/components/video-editor/types';
 import { findDominantRegion } from '@/components/video-editor/videoPlayback/zoomRegionUtils';
 import { applyZoomTransform } from '@/components/video-editor/videoPlayback/zoomTransform';
 import { DEFAULT_FOCUS, SMOOTHING_FACTOR, MIN_DELTA } from '@/components/video-editor/videoPlayback/constants';
-import { clampFocusToStage as clampFocusToStageUtil } from '@/components/video-editor/videoPlayback/focusUtils';
+import { clampFocusToStage as clampFocusToStageUtil, clampFocusToStageWithScale } from '@/components/video-editor/videoPlayback/focusUtils';
 import { renderAnnotations } from './annotationRenderer';
 
 interface FrameRenderConfig {
@@ -401,6 +401,12 @@ export class FrameRenderer {
     return clampFocusToStageUtil(focus, depth as any, this.layoutCache);
   }
 
+  private clampFocusToStageForRegion(region: ZoomRegion): { cx: number; cy: number } {
+    if (!this.layoutCache) return region.focus;
+    const scale = getRegionZoomScale(region);
+    return clampFocusToStageWithScale(region.focus, scale, this.layoutCache);
+  }
+
   private updateAnimationState(timeMs: number): number {
     if (!this.cameraContainer || !this.layoutCache) return 0;
 
@@ -411,8 +417,8 @@ export class FrameRenderer {
     let targetFocus = { ...defaultFocus };
 
     if (region && strength > 0) {
-      const zoomScale = ZOOM_DEPTH_SCALES[region.depth];
-      const regionFocus = this.clampFocusToStage(region.focus, region.depth);
+      const zoomScale = getRegionZoomScale(region);
+      const regionFocus = this.clampFocusToStageForRegion(region);
       
       targetScaleFactor = 1 + (zoomScale - 1) * strength;
       targetFocus = {

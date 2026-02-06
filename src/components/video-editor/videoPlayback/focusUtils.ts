@@ -15,18 +15,31 @@ export function clampFocusToStage(
   }
 
   const zoomScale = ZOOM_DEPTH_SCALES[depth];
-  
+  return clampFocusToStageWithScale(focus, zoomScale, stageSize);
+}
+
+/** Clamp focus point using a direct zoom scale value (supports customScale) */
+export function clampFocusToStageWithScale(
+  focus: ZoomFocus,
+  zoomScale: number,
+  stageSize: StageSize
+): ZoomFocus {
+  if (!stageSize.width || !stageSize.height) {
+    return clampFocusToDepth(focus, 1);
+  }
+
   const windowWidth = stageSize.width / zoomScale;
   const windowHeight = stageSize.height / zoomScale;
   
   const marginX = windowWidth / (2 * stageSize.width);
   const marginY = windowHeight / (2 * stageSize.height);
 
-  const baseFocus = clampFocusToDepth(focus, depth);
+  const baseCx = Math.max(0, Math.min(1, Number.isNaN(focus.cx) ? 0.5 : focus.cx));
+  const baseCy = Math.max(0, Math.min(1, Number.isNaN(focus.cy) ? 0.5 : focus.cy));
 
   return {
-    cx: Math.max(marginX, Math.min(1 - marginX, baseFocus.cx)),
-    cy: Math.max(marginY, Math.min(1 - marginY, baseFocus.cy)),
+    cx: Math.max(marginX, Math.min(1 - marginX, baseCx)),
+    cy: Math.max(marginY, Math.min(1 - marginY, baseCy)),
   };
 }
 

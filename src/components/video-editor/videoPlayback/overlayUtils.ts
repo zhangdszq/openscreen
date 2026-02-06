@@ -1,5 +1,5 @@
-import { ZOOM_DEPTH_SCALES, type ZoomRegion, type ZoomFocus } from "../types";
-import { clampFocusToStage } from "./focusUtils";
+import { getRegionZoomScale, type ZoomRegion, type ZoomFocus } from "../types";
+import { clampFocusToStageWithScale } from "./focusUtils";
 
 interface OverlayUpdateParams {
   overlayEl: HTMLDivElement;
@@ -11,13 +11,22 @@ interface OverlayUpdateParams {
   isPlaying: boolean;
 }
 
-export function updateOverlayIndicator(params: OverlayUpdateParams) {
+export interface OverlayRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  stageWidth: number;
+  stageHeight: number;
+}
+
+export function updateOverlayIndicator(params: OverlayUpdateParams): OverlayRect | null {
   const { overlayEl, indicatorEl, region, focusOverride, videoSize, baseScale, isPlaying } = params;
 
   if (!region) {
     indicatorEl.style.display = 'none';
     overlayEl.style.pointerEvents = 'none';
-    return;
+    return null;
   }
 
   const stageWidth = overlayEl.clientWidth;
@@ -26,19 +35,19 @@ export function updateOverlayIndicator(params: OverlayUpdateParams) {
   if (!stageWidth || !stageHeight) {
     indicatorEl.style.display = 'none';
     overlayEl.style.pointerEvents = 'none';
-    return;
+    return null;
   }
 
   if (!videoSize.width || !videoSize.height || baseScale <= 0) {
     indicatorEl.style.display = 'none';
     overlayEl.style.pointerEvents = isPlaying ? 'none' : 'auto';
-    return;
+    return null;
   }
 
-  const zoomScale = ZOOM_DEPTH_SCALES[region.depth];
-  const focus = clampFocusToStage(
+  const zoomScale = getRegionZoomScale(region);
+  const focus = clampFocusToStageWithScale(
     focusOverride ?? region.focus,
-    region.depth,
+    zoomScale,
     { width: stageWidth, height: stageHeight }
   );
 
@@ -63,4 +72,6 @@ export function updateOverlayIndicator(params: OverlayUpdateParams) {
   indicatorEl.style.left = `${adjustedLeft}px`;
   indicatorEl.style.top = `${adjustedTop}px`;
   overlayEl.style.pointerEvents = isPlaying ? 'none' : 'auto';
+
+  return { left: adjustedLeft, top: adjustedTop, width: indicatorWidth, height: indicatorHeight, stageWidth, stageHeight };
 }

@@ -2,12 +2,12 @@ import type React from "react";
 import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useMemo, useCallback } from "react";
 import { getAssetPath } from "@/lib/assetPath";
 import { Application, Container, Sprite, Graphics, BlurFilter, Texture, VideoSource } from 'pixi.js';
-import { ZOOM_DEPTH_SCALES, type ZoomRegion, type ZoomFocus, type ZoomDepth, type TrimRegion, type AnnotationRegion } from "./types";
+import { ZOOM_DEPTH_SCALES, getRegionZoomScale, type ZoomRegion, type ZoomFocus, type ZoomDepth, type TrimRegion, type AnnotationRegion } from "./types";
 import { DEFAULT_FOCUS, SMOOTHING_FACTOR, MIN_DELTA } from "./videoPlayback/constants";
 import { clamp01 } from "./videoPlayback/mathUtils";
 import { findDominantRegion } from "./videoPlayback/zoomRegionUtils";
-import { clampFocusToStage as clampFocusToStageUtil } from "./videoPlayback/focusUtils";
-import { updateOverlayIndicator } from "./videoPlayback/overlayUtils";
+import { clampFocusToStage as clampFocusToStageUtil, clampFocusToStageWithScale } from "./videoPlayback/focusUtils";
+import { updateOverlayIndicator, type OverlayRect } from "./videoPlayback/overlayUtils";
 import { layoutVideoContent as layoutVideoContentUtil } from "./videoPlayback/layoutUtils";
 import { applyZoomTransform } from "./videoPlayback/zoomTransform";
 import { createVideoEventHandlers } from "./videoPlayback/videoEventHandlers";
@@ -26,6 +26,7 @@ interface VideoPlaybackProps {
   selectedZoomId: string | null;
   onSelectZoom: (id: string | null) => void;
   onZoomFocusChange: (id: string, focus: ZoomFocus) => void;
+  onZoomScaleChange?: (id: string, scale: number, focus: ZoomFocus) => void;
   isPlaying: boolean;
   showShadow?: boolean;
   shadowIntensity?: number;
@@ -67,6 +68,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   selectedZoomId,
   onSelectZoom,
   onZoomFocusChange,
+  onZoomScaleChange,
   isPlaying,
   showShadow,
   shadowIntensity = 0,
@@ -101,6 +103,10 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   const animationStateRef = useRef({ scale: 1, focusX: DEFAULT_FOCUS.cx, focusY: DEFAULT_FOCUS.cy });
   const blurFilterRef = useRef<BlurFilter | null>(null);
   const isDraggingFocusRef = useRef(false);
+  const isResizingRef = useRef(false);
+  const resizeHandleRef = useRef<string | null>(null); // 'n','s','e','w','nw','ne','sw','se'
+  const resizeAnchorRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 }); // anchor point in stage px
+  const overlayRectRef = useRef<OverlayRect | null>(null);
   const stageSizeRef = useRef({ width: 0, height: 0 });
   const videoSizeRef = useRef({ width: 0, height: 0 });
   const baseScaleRef = useRef(1);
@@ -136,7 +142,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       stageSizeRef.current = { width: stageWidth, height: stageHeight };
     }
 
-    updateOverlayIndicator({
+    const rect = updateOverlayIndicator({
       overlayEl,
       indicatorEl,
       region,
@@ -145,6 +151,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       baseScale: baseScaleRef.current,
       isPlaying: isPlayingRef.current,
     });
+    overlayRectRef.current = rect;
   }, []);
 
   const layoutVideoContent = useCallback(() => {
@@ -259,14 +266,149 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     const localX = clientX - rect.left;
     const localY = clientY - rect.top;
 
+    const zoomScale = getRegionZoomScale(region);
     const unclampedFocus: ZoomFocus = {
       cx: clamp01(localX / stageWidth),
       cy: clamp01(localY / stageHeight),
     };
-    const clampedFocus = clampFocusToStage(unclampedFocus, region.depth);
+    const clampedFocus = clampFocusToStageWithScale(unclampedFocus, zoomScale, stageSizeRef.current);
 
     onZoomFocusChange(region.id, clampedFocus);
     updateOverlayForRegion({ ...region, focus: clampedFocus }, clampedFocus);
+  };
+
+  /** Compute new scale & focus from resize handle drag */
+  const updateResizeFromClientPoint = (clientX: number, clientY: number) => {
+    const overlayEl = overlayRef.current;
+    const handle = resizeHandleRef.current;
+    if (!overlayEl || !handle) return;
+
+    const regionId = selectedZoomIdRef.current;
+    if (!regionId) return;
+    const region = zoomRegionsRef.current.find((r) => r.id === regionId);
+    if (!region) return;
+
+    const rect = overlayEl.getBoundingClientRect();
+    const stageWidth = rect.width;
+    const stageHeight = rect.height;
+    if (!stageWidth || !stageHeight) return;
+
+    const localX = Math.max(0, Math.min(stageWidth, clientX - rect.left));
+    const localY = Math.max(0, Math.min(stageHeight, clientY - rect.top));
+    const anchor = resizeAnchorRef.current;
+    const stageAspect = stageWidth / stageHeight;
+
+    let newWidth: number;
+    let newHeight: number;
+    let centerX: number;
+    let centerY: number;
+
+    if (handle === 'e' || handle === 'w') {
+      // Horizontal edge: anchor is opposite vertical edge center
+      newWidth = Math.abs(localX - anchor.x);
+      newHeight = newWidth / stageAspect;
+      centerX = (localX + anchor.x) / 2;
+      centerY = anchor.y; // vertical center stays
+    } else if (handle === 'n' || handle === 's') {
+      // Vertical edge: anchor is opposite horizontal edge center
+      newHeight = Math.abs(localY - anchor.y);
+      newWidth = newHeight * stageAspect;
+      centerX = anchor.x; // horizontal center stays
+      centerY = (localY + anchor.y) / 2;
+    } else {
+      // Corner: anchor is opposite corner, maintain aspect ratio
+      const dx = Math.abs(localX - anchor.x);
+      const dy = Math.abs(localY - anchor.y);
+      // Use whichever dimension gives larger rectangle
+      const scaleFromX = stageWidth / (dx || 1);
+      const scaleFromY = stageHeight / (dy || 1);
+      const newScale = Math.min(scaleFromX, scaleFromY);
+      newWidth = stageWidth / newScale;
+      newHeight = stageHeight / newScale;
+      centerX = (localX + anchor.x) / 2;
+      centerY = (localY + anchor.y) / 2;
+    }
+
+    // Enforce min/max scale: min 1.1x, max 10x
+    const minWidth = stageWidth / 10;
+    const maxWidth = stageWidth / 1.1;
+    newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+    newHeight = newWidth / stageAspect;
+
+    const newScale = stageWidth / newWidth;
+
+    // Clamp center to keep rectangle within stage
+    const halfW = newWidth / 2;
+    const halfH = newHeight / 2;
+    centerX = Math.max(halfW, Math.min(stageWidth - halfW, centerX));
+    centerY = Math.max(halfH, Math.min(stageHeight - halfH, centerY));
+
+    const newFocus: ZoomFocus = {
+      cx: centerX / stageWidth,
+      cy: centerY / stageHeight,
+    };
+
+    if (onZoomScaleChange) {
+      onZoomScaleChange(region.id, newScale, newFocus);
+    }
+    updateOverlayForRegion({ ...region, customScale: newScale, focus: newFocus }, newFocus);
+  };
+
+  /** Detect which resize handle (if any) the pointer is on */
+  const getResizeHandle = (clientX: number, clientY: number): string | null => {
+    const overlayEl = overlayRef.current;
+    const oRect = overlayRectRef.current;
+    if (!overlayEl || !oRect) return null;
+
+    const elRect = overlayEl.getBoundingClientRect();
+    const localX = clientX - elRect.left;
+    const localY = clientY - elRect.top;
+
+    const { left, top, width, height } = oRect;
+    const handleSize = 8; // px from edge considered as handle zone
+
+    const onLeft = Math.abs(localX - left) <= handleSize;
+    const onRight = Math.abs(localX - (left + width)) <= handleSize;
+    const onTop = Math.abs(localY - top) <= handleSize;
+    const onBottom = Math.abs(localY - (top + height)) <= handleSize;
+
+    const inXRange = localX >= left - handleSize && localX <= left + width + handleSize;
+    const inYRange = localY >= top - handleSize && localY <= top + height + handleSize;
+
+    if (onTop && onLeft && inXRange && inYRange) return 'nw';
+    if (onTop && onRight && inXRange && inYRange) return 'ne';
+    if (onBottom && onLeft && inXRange && inYRange) return 'sw';
+    if (onBottom && onRight && inXRange && inYRange) return 'se';
+    if (onTop && inXRange) return 'n';
+    if (onBottom && inXRange) return 's';
+    if (onLeft && inYRange) return 'w';
+    if (onRight && inYRange) return 'e';
+
+    return null;
+  };
+
+  /** Compute the anchor point (opposite corner/edge) for resize */
+  const computeResizeAnchor = (handle: string, oRect: OverlayRect): { x: number; y: number } => {
+    const { left, top, width, height } = oRect;
+    const cx = left + width / 2;
+    const cy = top + height / 2;
+
+    switch (handle) {
+      case 'nw': return { x: left + width, y: top + height };
+      case 'ne': return { x: left, y: top + height };
+      case 'sw': return { x: left + width, y: top };
+      case 'se': return { x: left, y: top };
+      case 'n':  return { x: cx, y: top + height };
+      case 's':  return { x: cx, y: top };
+      case 'w':  return { x: left + width, y: cy };
+      case 'e':  return { x: left, y: cy };
+      default:   return { x: cx, y: cy };
+    }
+  };
+
+  const HANDLE_CURSORS: Record<string, string> = {
+    nw: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', se: 'nwse-resize',
+    n: 'ns-resize', s: 'ns-resize', w: 'ew-resize', e: 'ew-resize',
   };
 
   const handleOverlayPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -277,20 +419,47 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     if (!region) return;
     onSelectZoom(region.id);
     event.preventDefault();
-    isDraggingFocusRef.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
-    updateFocusFromClientPoint(event.clientX, event.clientY);
+
+    // Check if pointer is on a resize handle
+    const handle = getResizeHandle(event.clientX, event.clientY);
+    if (handle && overlayRectRef.current) {
+      isResizingRef.current = true;
+      resizeHandleRef.current = handle;
+      resizeAnchorRef.current = computeResizeAnchor(handle, overlayRectRef.current);
+      updateResizeFromClientPoint(event.clientX, event.clientY);
+    } else {
+      isDraggingFocusRef.current = true;
+      updateFocusFromClientPoint(event.clientX, event.clientY);
+    }
   };
 
   const handleOverlayPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Update cursor based on handle proximity
+    if (!isDraggingFocusRef.current && !isResizingRef.current && selectedZoomIdRef.current && !isPlayingRef.current) {
+      const handle = getResizeHandle(event.clientX, event.clientY);
+      const overlayEl = overlayRef.current;
+      if (overlayEl) {
+        overlayEl.style.cursor = handle ? HANDLE_CURSORS[handle] : 'grab';
+      }
+    }
+
+    if (isResizingRef.current) {
+      event.preventDefault();
+      updateResizeFromClientPoint(event.clientX, event.clientY);
+      return;
+    }
     if (!isDraggingFocusRef.current) return;
     event.preventDefault();
     updateFocusFromClientPoint(event.clientX, event.clientY);
   };
 
-  const endFocusDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingFocusRef.current) return;
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const wasDragging = isDraggingFocusRef.current || isResizingRef.current;
     isDraggingFocusRef.current = false;
+    isResizingRef.current = false;
+    resizeHandleRef.current = null;
+    if (!wasDragging) return;
     try {
       event.currentTarget.releasePointerCapture(event.pointerId);
     } catch {
@@ -299,11 +468,11 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   };
 
   const handleOverlayPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    endFocusDrag(event);
+    endDrag(event);
   };
 
   const handleOverlayPointerLeave = (event: React.PointerEvent<HTMLDivElement>) => {
-    endFocusDrag(event);
+    endDrag(event);
   };
 
   useEffect(() => {
@@ -431,6 +600,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       overlayEl.style.pointerEvents = 'none';
       return;
     }
+    // Default cursor; will be updated dynamically on pointer move for resize handles
     overlayEl.style.cursor = isPlaying ? 'not-allowed' : 'grab';
     overlayEl.style.pointerEvents = isPlaying ? 'none' : 'auto';
   }, [selectedZoom, isPlaying]);
@@ -642,8 +812,8 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       const shouldShowUnzoomedView = hasSelectedZoom && !isPlayingRef.current;
 
       if (region && strength > 0 && !shouldShowUnzoomedView) {
-        const zoomScale = ZOOM_DEPTH_SCALES[region.depth];
-        const regionFocus = clampFocusToStage(region.focus, region.depth);
+        const zoomScale = getRegionZoomScale(region);
+        const regionFocus = clampFocusToStageWithScale(region.focus, zoomScale, stageSizeRef.current);
         
         // Interpolate scale and focus based on region strength
         targetScaleFactor = 1 + (zoomScale - 1) * strength;
@@ -825,9 +995,35 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
         >
           <div
             ref={focusIndicatorRef}
-            className="absolute rounded-md border border-[#34B27B]/80 bg-[#34B27B]/20 shadow-[0_0_0_1px_rgba(52,178,123,0.35)]"
+            className="absolute rounded-md border-2 border-[#34B27B]/80 bg-[#34B27B]/15 shadow-[0_0_0_1px_rgba(52,178,123,0.35)]"
             style={{ display: 'none', pointerEvents: 'none' }}
-          />
+          >
+            {/* Corner handles */}
+            {['nw', 'ne', 'sw', 'se'].map((h) => (
+              <div
+                key={h}
+                className="absolute w-2.5 h-2.5 bg-white border-2 border-[#34B27B] rounded-sm"
+                style={{
+                  pointerEvents: 'none',
+                  ...(h.includes('n') ? { top: -5 } : { bottom: -5 }),
+                  ...(h.includes('w') ? { left: -5 } : { right: -5 }),
+                }}
+              />
+            ))}
+            {/* Edge handles */}
+            {['n', 's', 'e', 'w'].map((h) => (
+              <div
+                key={h}
+                className="absolute bg-white border-2 border-[#34B27B] rounded-sm"
+                style={{
+                  pointerEvents: 'none',
+                  ...(h === 'n' || h === 's'
+                    ? { width: 16, height: 5, left: '50%', transform: 'translateX(-50%)', ...(h === 'n' ? { top: -3 } : { bottom: -3 }) }
+                    : { width: 5, height: 16, top: '50%', transform: 'translateY(-50%)', ...(h === 'w' ? { left: -3 } : { right: -3 }) }),
+                }}
+              />
+            ))}
+          </div>
           {(() => {
             const filtered = (annotationRegions || []).filter((annotation) => {
               if (typeof annotation.startMs !== 'number' || typeof annotation.endMs !== 'number') return false;
