@@ -1975,7 +1975,7 @@ function registerSystemAudioIPC() {
         config.binaryPath = binaryPath;
       }
       audioTeeInstance = new AudioTee(config);
-      const senderWindow = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+      const senderWindow = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
       let dataChunkCount = 0;
       audioTeeInstance.on("data", (chunk) => {
         dataChunkCount++;

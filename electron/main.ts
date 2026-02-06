@@ -243,8 +243,10 @@ function registerSystemAudioIPC() {
 
       audioTeeInstance = new AudioTee(config)
 
-      // Find the sender window to stream data to
-      const senderWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+      // Send audio data to the main window (NOT any overlay/indicator window)
+      const senderWindow = mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
 
       let dataChunkCount = 0
       audioTeeInstance.on('data', (chunk: { data: Buffer }) => {
