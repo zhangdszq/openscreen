@@ -9,7 +9,11 @@ export type {
 } from '@/components/video-editor/types';
 
 /**
- * Options for extracting keyframes from video
+ * Options for extracting keyframes from video.
+ * 
+ * When using preview-based extraction (extractFrameFromPreview), aspect ratio
+ * and crop region are handled by the PixiJS preview canvas automatically.
+ * These options only control output format and size constraints.
  */
 export interface KeyframeExtractionOptions {
   /** Output image format */

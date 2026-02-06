@@ -6,6 +6,9 @@
  * - Add manual keyframes at current time
  * - Delete/edit keyframes
  * - Open flow graph editor
+ * 
+ * Extraction captures the PixiJS preview canvas directly,
+ * so keyframes match exactly what the user sees (crop, padding, border-radius, wallpaper).
  */
 
 import React, { useCallback, useRef } from 'react';
@@ -19,23 +22,31 @@ import {
   Loader2,
   ImageIcon,
 } from 'lucide-react';
+import type { Application } from 'pixi.js';
 import { useKeyframeStore } from './keyframeStore';
-import { extractFrameAtTime, extractKeyframesFromClicks } from './keyframeExtractor';
+import { extractFrameFromPreview, extractKeyframesFromClicksPreview, extractFrameAtTime, extractKeyframesFromClicks } from './keyframeExtractor';
 import type { KeyframeCapture, MouseTrackData } from '@/components/video-editor/types';
+import type { AspectRatio } from '@/utils/aspectRatioUtils';
+import { formatAspectRatioForCSS } from '@/utils/aspectRatioUtils';
 import { cn } from '@/lib/utils';
 
-// Generic type for objects with a video property
+// Generic type for objects with a video property (and optionally a PixiJS app)
 interface HasVideoElement {
   video: HTMLVideoElement | null;
+  app?: Application | null;
 }
 
 interface KeyframePanelProps {
-  /** Video element reference for frame extraction - can be direct HTMLVideoElement ref or any object with .video property */
+  /** Video element reference for frame extraction - can be direct HTMLVideoElement ref or any object with .video/.app property */
   videoRef: React.RefObject<HasVideoElement | HTMLVideoElement | null>;
   /** Current playback time in ms */
   currentTimeMs: number;
   /** Mouse track data for auto-extraction */
   mouseTrackData?: MouseTrackData;
+  /** Current aspect ratio for thumbnail display */
+  aspectRatio?: AspectRatio;
+  /** Wallpaper background for compositing with preview canvas */
+  wallpaper?: string;
   /** Callback to seek video to time */
   onSeek?: (timeMs: number) => void;
   /** Callback to open flow editor */
@@ -48,6 +59,8 @@ export function KeyframePanel({
   videoRef,
   currentTimeMs,
   mouseTrackData,
+  aspectRatio,
+  wallpaper,
   onSeek,
   onOpenFlowEditor,
   onExport,
@@ -71,21 +84,23 @@ export function KeyframePanel({
   const editInputRef = useRef<HTMLInputElement>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
 
-  // Helper to get video element from ref (handles both direct HTMLVideoElement and objects with .video property)
-  const getVideoElement = useCallback((): HTMLVideoElement | null => {
+  // Helper to get video element and PixiJS app from ref
+  const getVideoAndApp = useCallback((): { video: HTMLVideoElement; app: Application | null } | null => {
     if (!videoRef.current) return null;
     
     // Check if it's an object with .video property (like VideoPlaybackRef)
     if (typeof videoRef.current === 'object' && 'video' in videoRef.current) {
-      const video = (videoRef.current as HasVideoElement).video;
+      const ref = videoRef.current as HasVideoElement;
+      const video = ref.video;
       if (video instanceof HTMLVideoElement) {
-        return video;
+        const app = (ref.app ?? null) as Application | null;
+        return { video, app };
       }
     }
     
     // Check if it's a direct HTMLVideoElement
     if (videoRef.current instanceof HTMLVideoElement) {
-      return videoRef.current;
+      return { video: videoRef.current, app: null };
     }
     
     return null;
@@ -93,12 +108,20 @@ export function KeyframePanel({
 
   // Extract single keyframe at current time
   const handleExtractCurrent = useCallback(async () => {
-    const video = getVideoElement();
-    if (!video) return;
+    const refs = getVideoAndApp();
+    if (!refs) return;
 
     setExtracting(true);
     try {
-      const result = await extractFrameAtTime(video, currentTimeMs);
+      let result;
+      if (refs.app) {
+        // Preview-based extraction — exact match with what user sees
+        result = await extractFrameFromPreview(refs.video, refs.app, currentTimeMs, {}, wallpaper);
+      } else {
+        // Fallback to raw video extraction
+        result = await extractFrameAtTime(refs.video, currentTimeMs);
+      }
+
       if (result.success && result.keyframe) {
         addKeyframe({
           ...result.keyframe,
@@ -109,12 +132,12 @@ export function KeyframePanel({
     } finally {
       setExtracting(false);
     }
-  }, [getVideoElement, currentTimeMs, addKeyframe, setExtracting]);
+  }, [getVideoAndApp, currentTimeMs, addKeyframe, setExtracting, wallpaper]);
 
   // Extract all keyframes from mouse clicks
   const handleExtractFromClicks = useCallback(async () => {
-    const video = getVideoElement();
-    if (!video || !mouseTrackData) return;
+    const refs = getVideoAndApp();
+    if (!refs || !mouseTrackData) return;
 
     const clickCount = mouseTrackData.events.filter(e => e.type === 'click').length;
     if (clickCount === 0) {
@@ -124,12 +147,26 @@ export function KeyframePanel({
 
     setExtracting(true);
     try {
-      const result = await extractKeyframesFromClicks(
-        video,
-        mouseTrackData,
-        {},
-        (current, total) => setExtractionProgress({ current, total })
-      );
+      let result;
+      if (refs.app) {
+        // Preview-based extraction
+        result = await extractKeyframesFromClicksPreview(
+          refs.video,
+          refs.app,
+          mouseTrackData,
+          {},
+          wallpaper,
+          (current, total) => setExtractionProgress({ current, total }),
+        );
+      } else {
+        // Fallback to raw extraction
+        result = await extractKeyframesFromClicks(
+          refs.video,
+          mouseTrackData,
+          {},
+          (current, total) => setExtractionProgress({ current, total }),
+        );
+      }
       
       if (result.keyframes.length > 0) {
         addKeyframes(result.keyframes);
@@ -143,7 +180,7 @@ export function KeyframePanel({
       setExtracting(false);
       setExtractionProgress(null);
     }
-  }, [getVideoElement, mouseTrackData, addKeyframes, autoLayoutKeyframes, setExtracting, setExtractionProgress]);
+  }, [getVideoAndApp, mouseTrackData, addKeyframes, autoLayoutKeyframes, setExtracting, setExtractionProgress, wallpaper]);
 
   // Handle keyframe click
   const handleKeyframeClick = useCallback((keyframe: KeyframeCapture, event: React.MouseEvent) => {
@@ -230,6 +267,7 @@ export function KeyframePanel({
                   isSelected={selectedKeyframeIds.includes(keyframe.id)}
                   isEditing={editingId === keyframe.id}
                   editInputRef={editInputRef}
+                  aspectRatio={aspectRatio}
                   onClick={handleKeyframeClick}
                   onDelete={handleDelete}
                   onEditLabel={handleEditLabel}
@@ -271,6 +309,7 @@ interface KeyframeThumbnailProps {
   isSelected: boolean;
   isEditing: boolean;
   editInputRef: React.RefObject<HTMLInputElement>;
+  aspectRatio?: AspectRatio;
   onClick: (keyframe: KeyframeCapture, event: React.MouseEvent) => void;
   onDelete: (id: string) => void;
   onEditLabel: (id: string) => void;
@@ -282,6 +321,7 @@ function KeyframeThumbnail({
   isSelected,
   isEditing,
   editInputRef,
+  aspectRatio,
   onClick,
   onDelete,
   onEditLabel,
@@ -304,7 +344,10 @@ function KeyframeThumbnail({
       )}
     >
       {/* Thumbnail Image */}
-      <div className="aspect-video bg-black/50 relative">
+      <div
+        className="bg-black/50 relative"
+        style={{ aspectRatio: aspectRatio ? formatAspectRatioForCSS(aspectRatio) : '16/9' }}
+      >
         {keyframe.imageData ? (
           <img
             src={keyframe.imageData}

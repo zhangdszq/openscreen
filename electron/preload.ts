@@ -170,7 +170,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getWindowBounds: () => {
     return ipcRenderer.invoke('get-window-bounds')
   },
-  saveRegionInfo: (regionInfo: { x: number; y: number; width: number; height: number }, fileName: string) => {
+  saveRegionInfo: (regionInfo: Record<string, any>, fileName: string) => {
     return ipcRenderer.invoke('save-region-info', regionInfo, fileName)
   },
   loadRegionInfo: (videoPath: string) => {

@@ -61,6 +61,59 @@ import { KeyframePanel, FlowEditor, useKeyframeStore, downloadFigmaPackage } fro
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_PATHS = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `/wallpapers/wallpaper${i + 1}.jpg`);
 
+/**
+ * Compute normalized crop region (0-1) from saved region data and actual video dimensions.
+ *
+ * Prefers recomputing from raw screen coordinates + display bounds (accurate).
+ * The key insight: the normalized crop = proportion of the display the region covers.
+ * This is independent of the video resolution, avoiding getSettings() inaccuracy issues.
+ *
+ * Falls back to pre-computed pixel crop divided by video dimensions (legacy).
+ */
+function computeRegionCrop(
+  regionData: any,
+  videoWidth: number,
+  videoHeight: number,
+): CropRegion | null {
+  if (!regionData || videoWidth <= 0 || videoHeight <= 0) return null;
+
+  let cropX: number;
+  let cropY: number;
+  let cropW: number;
+  let cropH: number;
+
+  if (regionData.absoluteRegion && regionData.displayBounds) {
+    // Accurate path: compute directly from screen coordinates / display bounds.
+    // Since the video captures the ENTIRE display (scaled), the proportion of the
+    // display that the region covers equals the proportion of the video to crop.
+    const abs = regionData.absoluteRegion;
+    const db = regionData.displayBounds;
+    cropX = (abs.x - db.x) / db.width;
+    cropY = (abs.y - db.y) / db.height;
+    cropW = abs.width / db.width;
+    cropH = abs.height / db.height;
+    console.log('Region crop from raw screen data:', {
+      absoluteRegion: abs,
+      displayBounds: db,
+      normalized: { x: cropX, y: cropY, w: cropW, h: cropH },
+    });
+  } else {
+    // Legacy fallback: pre-computed pixel crop divided by video dimensions
+    cropX = regionData.x / videoWidth;
+    cropY = regionData.y / videoHeight;
+    cropW = regionData.width / videoWidth;
+    cropH = regionData.height / videoHeight;
+    console.log('Region crop from legacy pixel data:', { cropX, cropY, cropW, cropH });
+  }
+
+  return {
+    x: Math.max(0, Math.min(1, cropX)),
+    y: Math.max(0, Math.min(1, cropY)),
+    width: Math.max(0.01, Math.min(1 - Math.max(0, cropX), cropW)),
+    height: Math.max(0.01, Math.min(1 - Math.max(0, cropY), cropH)),
+  };
+}
+
 export default function VideoEditor() {
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1239,20 +1292,9 @@ export default function VideoEditor() {
                                 const pendingRegion = (window as any).__pendingRegionCrop;
                                 if (pendingRegion && videoPlaybackRef.current?.video) {
                                   const video = videoPlaybackRef.current.video;
-                                  const videoWidth = video.videoWidth;
-                                  const videoHeight = video.videoHeight;
-                                  if (videoWidth > 0 && videoHeight > 0) {
-                                    const cropX = pendingRegion.x / videoWidth;
-                                    const cropY = pendingRegion.y / videoHeight;
-                                    const cropWidth = pendingRegion.width / videoWidth;
-                                    const cropHeight = pendingRegion.height / videoHeight;
-                                    const normalizedCrop = {
-                                      x: Math.max(0, Math.min(1, cropX)),
-                                      y: Math.max(0, Math.min(1, cropY)),
-                                      width: Math.max(0.1, Math.min(1 - Math.max(0, cropX), cropWidth)),
-                                      height: Math.max(0.1, Math.min(1 - Math.max(0, cropHeight), cropHeight)),
-                                    };
-                                    setCropRegion(normalizedCrop);
+                                  const crop = computeRegionCrop(pendingRegion, video.videoWidth, video.videoHeight);
+                                  if (crop) {
+                                    setCropRegion(crop);
                                     delete (window as any).__pendingRegionCrop;
                                   }
                                 }
@@ -1361,20 +1403,9 @@ export default function VideoEditor() {
                             const pendingRegion = (window as any).__pendingRegionCrop;
                             if (pendingRegion && videoPlaybackRef.current?.video) {
                               const video = videoPlaybackRef.current.video;
-                              const videoWidth = video.videoWidth;
-                              const videoHeight = video.videoHeight;
-                              if (videoWidth > 0 && videoHeight > 0) {
-                                const cropX = pendingRegion.x / videoWidth;
-                                const cropY = pendingRegion.y / videoHeight;
-                                const cropWidth = pendingRegion.width / videoWidth;
-                                const cropHeight = pendingRegion.height / videoHeight;
-                                const normalizedCrop = {
-                                  x: Math.max(0, Math.min(1, cropX)),
-                                  y: Math.max(0, Math.min(1, cropY)),
-                                  width: Math.max(0.1, Math.min(1 - Math.max(0, cropX), cropWidth)),
-                                  height: Math.max(0.1, Math.min(1 - Math.max(0, cropY), cropHeight)),
-                                };
-                                setCropRegion(normalizedCrop);
+                              const crop = computeRegionCrop(pendingRegion, video.videoWidth, video.videoHeight);
+                              if (crop) {
+                                setCropRegion(crop);
                                 delete (window as any).__pendingRegionCrop;
                               }
                             }
@@ -1543,9 +1574,11 @@ export default function VideoEditor() {
             ) : (
               <div className="flex-1 bg-[#09090b] border border-white/5 rounded-2xl overflow-hidden">
                 <KeyframePanel
-                  videoRef={videoPlaybackRef as React.RefObject<{ video: HTMLVideoElement | null }>}
+                  videoRef={videoPlaybackRef}
                   currentTimeMs={Math.round(currentTime * 1000)}
                   mouseTrackData={{ events: mouseClickEvents, screenBounds: { width: 1920, height: 1080 } }}
+                  aspectRatio={aspectRatio}
+                  wallpaper={wallpaper}
                   onSeek={handleSeekFromKeyframe}
                   onOpenFlowEditor={handleOpenFlowEditor}
                   onExport={handleExportFlowGraph}

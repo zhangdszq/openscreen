@@ -15,7 +15,9 @@ export { DEFAULT_EXTRACTION_OPTIONS } from './types';
 // Extractor functions
 export {
   extractFrameAtTime,
+  extractFrameFromPreview,
   extractKeyframesFromClicks,
+  extractKeyframesFromClicksPreview,
   extractKeyframesAtTimes,
   drawMouseMarker,
   keyframeToBlob,

@@ -748,18 +748,22 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       }
       const videoTrack = stream.current.getVideoTracks()[0];
       try {
+        // Only constrain frame rate. Do NOT set ideal width/height because
+        // applyConstraints causes getSettings() to report the ideal values
+        // instead of the actual capture dimensions — this breaks region crop
+        // calculations. The initial mandatory maxWidth/maxHeight already
+        // ensures we capture at most 4K.
         await videoTrack.applyConstraints({
           frameRate: { ideal: TARGET_FRAME_RATE, max: TARGET_FRAME_RATE },
-          width: { ideal: TARGET_WIDTH, max: TARGET_WIDTH },
-          height: { ideal: TARGET_HEIGHT, max: TARGET_HEIGHT },
         });
       } catch (error) {
-        console.warn("Unable to lock 4K/60fps constraints, using best available track settings.", error);
+        console.warn("Unable to lock frame rate constraint, using best available track settings.", error);
       }
 
       let { width = 1920, height = 1080, frameRate = TARGET_FRAME_RATE } = videoTrack.getSettings();
       const videoPixelWidth = width || 1920;
       const videoPixelHeight = height || 1080;
+      console.log('Video track actual dimensions:', videoPixelWidth, 'x', videoPixelHeight, '@ ', frameRate, 'fps');
 
       // Get source bounds for camera positioning and mouse tracking
       let sourceBounds: { x: number; y: number; width: number; height: number } | null = null;
@@ -801,9 +805,23 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             width: Math.round(absoluteRegion.width * ratioX),
             height: Math.round(absoluteRegion.height * ratioY),
           };
-          console.log('Region relative to display (video scaled):', regionCrop);
+          console.log('Region crop calculation:', {
+            absoluteRegion,
+            displayBounds: regionDisplayBounds,
+            videoSize: { width: videoPixelWidth, height: videoPixelHeight },
+            ratio: { x: ratioX, y: ratioY },
+            regionCrop,
+          });
         } else {
-          regionCrop = absoluteRegion;
+          // Fallback: use devicePixelRatio as best-guess scale factor
+          const fallbackScale = window.devicePixelRatio || 2;
+          console.warn('No display bounds available, using devicePixelRatio fallback:', fallbackScale);
+          regionCrop = {
+            x: Math.round(absoluteRegion.x * fallbackScale),
+            y: Math.round(absoluteRegion.y * fallbackScale),
+            width: Math.round(absoluteRegion.width * fallbackScale),
+            height: Math.round(absoluteRegion.height * fallbackScale),
+          };
         }
       }
 
@@ -964,12 +982,22 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             }
           }
           
-          // Save region crop info if this was a region recording
-          if (regionCrop && window.electronAPI?.saveRegionInfo) {
+          // Save region info if this was a region recording
+          // Save raw screen coordinates + display bounds so the editor can
+          // recompute the crop using the video's actual dimensions,
+          // avoiding getSettings() inaccuracies.
+          if (absoluteRegion && window.electronAPI?.saveRegionInfo) {
             const regionFileName = `recording-${timestamp}.region.json`;
             try {
-              await window.electronAPI.saveRegionInfo(regionCrop, regionFileName);
-              console.log('Region info saved:', regionFileName);
+              const regionData = {
+                // Legacy: pre-computed crop in video pixel space (may be inaccurate)
+                ...regionCrop,
+                // Raw data for accurate recomputation in the editor
+                absoluteRegion,
+                displayBounds: regionDisplayBounds,
+              };
+              await window.electronAPI.saveRegionInfo(regionData, regionFileName);
+              console.log('Region info saved:', regionFileName, regionData);
             } catch (error) {
               console.warn('Failed to save region info:', error);
             }
