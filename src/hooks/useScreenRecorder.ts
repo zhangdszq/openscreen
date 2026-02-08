@@ -398,9 +398,16 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       console.log('System audio requested:', captureSystemAudio);
 
       // Get video stream using getUserMedia (more reliable for source selection)
-      const getVideoStream = async () => {
+      // On non-macOS, optionally include audio in the same getUserMedia call
+      // because Electron requires video+audio to be requested together with chromeMediaSource: "desktop"
+      const getVideoStream = async (includeAudio: boolean = false) => {
         return await (navigator.mediaDevices as any).getUserMedia({
-          audio: false,
+          audio: includeAudio ? {
+            mandatory: {
+              chromeMediaSource: "desktop",
+              chromeMediaSourceId: actualSourceId,
+            },
+          } : false,
           video: {
             mandatory: {
               chromeMediaSource: "desktop",
@@ -641,22 +648,22 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         }
 
         // Step 2: Get video stream
-        console.log('[SystemAudio] Getting video stream...');
-        mediaStream = await getVideoStream();
+        // On non-macOS, request audio together with video in a single getUserMedia call
+        // (Electron's chromeMediaSource: "desktop" requires video+audio to be in the same call)
+        const shouldIncludeAudioInVideo = captureSystemAudio && !isMacOS;
+        console.log('[SystemAudio] Getting video stream...', shouldIncludeAudioInVideo ? '(with audio)' : '(video only)');
+        mediaStream = await getVideoStream(shouldIncludeAudioInVideo);
         console.log('[SystemAudio] Video stream obtained');
         
-        // Step 3: Try to get system audio if requested (non-macOS or if not already attempted)
-        if (captureSystemAudio && !isMacOS) {
-          console.log('[SystemAudio] Attempting to capture system audio (non-macOS)...');
-          
-          // Try getDisplayMedia first (macOS loopback)
-          let audioStream = await getSystemAudioStream();
-          
-          // If that failed, try getUserMedia (Windows/Linux)
-          if (!audioStream) {
-            audioStream = await getDesktopAudioStream();
+        // On non-macOS, extract audio track from the combined video+audio stream
+        if (shouldIncludeAudioInVideo) {
+          const audioTracks = mediaStream.getAudioTracks();
+          if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
+            console.log('[SystemAudio] Got desktop audio from combined stream');
+            pendingSystemAudioStream = new MediaStream(audioTracks);
+          } else {
+            console.warn('[SystemAudio] No live audio track in combined stream');
           }
-          pendingSystemAudioStream = audioStream;
         }
 
         if (captureSystemAudio && pendingSystemAudioStream) {

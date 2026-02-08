@@ -1945,7 +1945,25 @@ async function checkScreenCapturePermission() {
 let audioTeeInstance = null;
 let audioTeeStarted = false;
 function registerSystemAudioIPC() {
-  if (process.platform !== "darwin") return;
+  if (process.platform !== "darwin") {
+    ipcMain.handle("start-system-audio-capture", async () => {
+      return { success: false, error: "System audio capture via AudioTee is only supported on macOS" };
+    });
+    ipcMain.handle("stop-system-audio-capture", async () => {
+      return { success: true };
+    });
+    ipcMain.handle("test-system-audio", async () => {
+      return {
+        platform: process.platform,
+        macosVersion: null,
+        electronVersion: process.versions.electron,
+        screenPermission: "not-applicable",
+        audioTeeStarted: false,
+        method: "none"
+      };
+    });
+    return;
+  }
   console.log("[SystemAudio] macOS version:", process.getSystemVersion());
   console.log("[SystemAudio] Method: native AudioTee (Core Audio Taps)");
   ipcMain.handle("start-system-audio-capture", async (_event, options) => {
@@ -2068,8 +2086,9 @@ app.whenReady().then(async () => {
   createWindow();
   const forwardRendererLogs = (win) => {
     if (!win || win.isDestroyed()) return;
-    win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-      if (message.includes("SystemAudio") || message.includes("loopback") || message.includes("system audio")) {
+    win.webContents.on("console-message", (event) => {
+      const { level, message, lineNumber: line, sourceId } = event;
+      if (message && (message.includes("SystemAudio") || message.includes("loopback") || message.includes("system audio"))) {
         const prefix = ["[V]", "[I]", "[W]", "[E]"][level] || "[?]";
         const src = sourceId ? sourceId.split("/").pop() : "";
         console.log(`[Renderer${prefix}] ${src}:${line} ${message}`);
