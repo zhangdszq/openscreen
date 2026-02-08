@@ -299,6 +299,7 @@ export class FrameRenderer {
     applyZoomTransform({
       cameraContainer: this.cameraContainer,
       blurFilter: this.blurFilter,
+      videoContainer: this.videoContainer,
       stageSize: this.layoutCache.stageSize,
       baseMask: this.layoutCache.maskRect,
       zoomScale: this.animationState.scale,

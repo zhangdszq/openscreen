@@ -6,6 +6,11 @@ import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow,
 import { registerIpcHandlers, getSelectedSource } from './ipc/handlers'
 import { cleanup as cleanupMouseTracker } from './mouseTracker'
 
+// Enable GPU hardware acceleration for video decoding and WebGL rendering
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -384,7 +389,7 @@ app.whenReady().then(async () => {
     if (!win || win.isDestroyed()) return
     win.webContents.on('console-message', (event) => {
       const { level, message, lineNumber: line, sourceId } = event as any
-      if (message && (message.includes('SystemAudio') || message.includes('loopback') || message.includes('system audio'))) {
+      if (message && (message.includes('SystemAudio') || message.includes('loopback') || message.includes('system audio') || message.includes('[Perf:'))) {
         const prefix = ['[V]', '[I]', '[W]', '[E]'][level] || '[?]'
         const src = sourceId ? sourceId.split('/').pop() : ''
         console.log(`[Renderer${prefix}] ${src}:${line} ${message}`)

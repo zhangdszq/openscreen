@@ -1807,6 +1807,10 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     }
   });
 }
+app.commandLine.appendSwitch("enable-gpu-rasterization");
+app.commandLine.appendSwitch("enable-zero-copy");
+app.commandLine.appendSwitch("ignore-gpu-blocklist");
+app.commandLine.appendSwitch("enable-hardware-overlays", "single-fullscreen,single-on-top,underlay");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECORDINGS_DIR = path.join(app.getPath("userData"), "recordings");
 async function ensureRecordingsDir() {
@@ -2088,7 +2092,7 @@ app.whenReady().then(async () => {
     if (!win || win.isDestroyed()) return;
     win.webContents.on("console-message", (event) => {
       const { level, message, lineNumber: line, sourceId } = event;
-      if (message && (message.includes("SystemAudio") || message.includes("loopback") || message.includes("system audio"))) {
+      if (message && (message.includes("SystemAudio") || message.includes("loopback") || message.includes("system audio") || message.includes("[Perf:"))) {
         const prefix = ["[V]", "[I]", "[W]", "[E]"][level] || "[?]";
         const src = sourceId ? sourceId.split("/").pop() : "";
         console.log(`[Renderer${prefix}] ${src}:${line} ${message}`);

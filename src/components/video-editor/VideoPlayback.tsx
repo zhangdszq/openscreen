@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useMemo, useCallback } from "react";
+import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useMemo, useCallback, memo } from "react";
 import { getAssetPath } from "@/lib/assetPath";
 import { Application, Container, Sprite, Graphics, BlurFilter, Texture, VideoSource } from 'pixi.js';
 import { ZOOM_DEPTH_SCALES, getRegionZoomScale, type ZoomRegion, type ZoomFocus, type ZoomDepth, type TrimRegion, type AnnotationRegion } from "./types";
@@ -127,7 +127,35 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     return clampFocusToStageUtil(focus, depth, stageSizeRef.current);
   }, []);
 
+  // Memoize visible annotations: filter by time range and sort by z-index.
+  // Only recomputes when currentTime, annotations, or selection changes.
+  const visibleAnnotations = useMemo(() => {
+    const timeMs = Math.round(currentTime * 1000);
+    const filtered = (annotationRegions || []).filter((annotation) => {
+      if (typeof annotation.startMs !== 'number' || typeof annotation.endMs !== 'number') return false;
+      if (annotation.id === selectedAnnotationId) return true;
+      return timeMs >= annotation.startMs && timeMs <= annotation.endMs;
+    });
+    return [...filtered].sort((a, b) => a.zIndex - b.zIndex);
+  }, [annotationRegions, currentTime, selectedAnnotationId]);
+
+  // Handle click-through cycling for annotation clicks
+  const handleAnnotationClick = useCallback((clickedId: string) => {
+    if (!onSelectAnnotation) return;
+    if (clickedId === selectedAnnotationId && visibleAnnotations.length > 1) {
+      const currentIndex = visibleAnnotations.findIndex(a => a.id === clickedId);
+      const nextIndex = (currentIndex + 1) % visibleAnnotations.length;
+      onSelectAnnotation(visibleAnnotations[nextIndex].id);
+    } else {
+      onSelectAnnotation(clickedId);
+    }
+  }, [onSelectAnnotation, selectedAnnotationId, visibleAnnotations]);
+
   const updateOverlayForRegion = useCallback((region: ZoomRegion | null, focusOverride?: ZoomFocus) => {
+    // Skip DOM-heavy overlay updates during playback to avoid layout thrashing.
+    // The overlay indicator is hidden (pointer-events: none) while playing anyway.
+    if (isPlayingRef.current) return;
+
     const overlayEl = overlayRef.current;
     const indicatorEl = focusIndicatorRef.current;
     
@@ -545,6 +573,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       applyZoomTransform({
         cameraContainer: container,
         blurFilter: blurFilterRef.current,
+        videoContainer: videoContainerRef.current,
         stageSize: stageSizeRef.current,
         baseMask: baseMaskRef.current,
         zoomScale: 1,
@@ -615,12 +644,14 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     (async () => {
       app = new Application();
       
+      // Cap resolution at 1 for playback preview — high DPR (e.g. 2x) doubles
+      // the rendering pixel count with negligible visual benefit for video content.
       await app.init({
         width: container.clientWidth,
         height: container.clientHeight,
         backgroundAlpha: 0,
-        antialias: true,
-        resolution: window.devicePixelRatio || 1,
+        antialias: false,
+        resolution: 1,
         autoDensity: true,
       });
 
@@ -690,8 +721,11 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     if ('autoPlay' in source) {
       (source as { autoPlay?: boolean }).autoPlay = false;
     }
+    // Disable auto-update so we control texture upload frequency (see ticker below).
+    // At 2560x1440, each upload is ~14MB RGBA. At 60fps that's 840MB/s CPU→GPU.
+    // Manually updating at 30fps halves this bandwidth.
     if ('autoUpdate' in source) {
-      (source as { autoUpdate?: boolean }).autoUpdate = true;
+      (source as { autoUpdate?: boolean }).autoUpdate = false;
     }
     const videoTexture = Texture.from(source);
     
@@ -714,7 +748,8 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     blurFilter.quality = 3;
     blurFilter.resolution = app.renderer.resolution;
     blurFilter.blur = 0;
-    videoContainer.filters = [blurFilter];
+    // Don't mount filter immediately — applyZoomTransform adds it only when blur > 0
+    videoContainer.filters = [];
     blurFilterRef.current = blurFilter;
     
     layoutVideoContent();
@@ -787,6 +822,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       applyZoomTransform({
         cameraContainer,
         blurFilter: blurFilterRef.current,
+        videoContainer: videoContainerRef.current,
         stageSize: stageSizeRef.current,
         baseMask: baseMaskRef.current,
         zoomScale: state.scale,
@@ -798,7 +834,34 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       });
     };
 
+    // Performance diagnostics: measure ticker frame budget
+    let tickerFrameCount = 0;
+    let tickerTotalMs = 0;
+    let tickerMaxMs = 0;
+    let lastTickerLogTime = performance.now();
+
+    // Manual video texture update at ~30fps (every other tick) to reduce GPU upload bandwidth
+    let textureUpdateToggle = false;
+    const videoTextureSource = videoSprite.texture?.source as any;
+
     const ticker = () => {
+      const tickStart = performance.now();
+
+      // Update video texture at 30fps (toggle every frame)
+      if (isPlayingRef.current && videoTextureSource?.update) {
+        textureUpdateToggle = !textureUpdateToggle;
+        if (textureUpdateToggle) {
+          videoTextureSource.update();
+        }
+      } else if (videoTextureSource?.update) {
+        // Always update when paused/seeking (ensure frame is current)
+        videoTextureSource.update();
+      }
+
+      // Skip expensive zoom/pan computation when paused and animation has settled
+      const state = animationStateRef.current;
+      const isPlaying = isPlayingRef.current;
+
       const { region, strength } = findDominantRegion(zoomRegionsRef.current, currentTimeRef.current);
       
       const defaultFocus = DEFAULT_FOCUS;
@@ -809,7 +872,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       // (the overlay will show where the zoom will be)
       const selectedId = selectedZoomIdRef.current;
       const hasSelectedZoom = selectedId !== null;
-      const shouldShowUnzoomedView = hasSelectedZoom && !isPlayingRef.current;
+      const shouldShowUnzoomedView = hasSelectedZoom && !isPlaying;
 
       if (region && strength > 0 && !shouldShowUnzoomedView) {
         const zoomScale = getRegionZoomScale(region);
@@ -823,8 +886,6 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
         };
       }
 
-      const state = animationStateRef.current;
-
       const prevScale = state.scale;
       const prevFocusX = state.focusX;
       const prevFocusY = state.focusY;
@@ -832,6 +893,14 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       const scaleDelta = targetScaleFactor - state.scale;
       const focusXDelta = targetFocus.cx - state.focusX;
       const focusYDelta = targetFocus.cy - state.focusY;
+
+      // If paused and animation has already converged, skip the rest of the work
+      if (!isPlaying
+        && Math.abs(scaleDelta) <= MIN_DELTA
+        && Math.abs(focusXDelta) <= MIN_DELTA
+        && Math.abs(focusYDelta) <= MIN_DELTA) {
+        return;
+      }
 
       let nextScale = prevScale;
       let nextFocusX = prevFocusX;
@@ -866,6 +935,26 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       );
 
       applyTransform(motionIntensity);
+
+      // Performance logging
+      const tickEnd = performance.now();
+      const tickMs = tickEnd - tickStart;
+      tickerFrameCount++;
+      tickerTotalMs += tickMs;
+      if (tickMs > tickerMaxMs) tickerMaxMs = tickMs;
+
+      // Log every 3 seconds
+      if (tickEnd - lastTickerLogTime >= 3000) {
+        const avgMs = tickerTotalMs / tickerFrameCount;
+        console.log(
+          `[Perf:Ticker] ${tickerFrameCount} frames in 3s (${(tickerFrameCount / 3).toFixed(1)} fps), ` +
+          `avg=${avgMs.toFixed(2)}ms, max=${tickerMaxMs.toFixed(2)}ms, playing=${isPlaying}`
+        );
+        tickerFrameCount = 0;
+        tickerTotalMs = 0;
+        tickerMaxMs = 0;
+        lastTickerLogTime = tickEnd;
+      }
     };
 
     app.ticker.add(ticker);
@@ -1024,36 +1113,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
               />
             ))}
           </div>
-          {(() => {
-            const filtered = (annotationRegions || []).filter((annotation) => {
-              if (typeof annotation.startMs !== 'number' || typeof annotation.endMs !== 'number') return false;
-              
-              if (annotation.id === selectedAnnotationId) return true;
-              
-              const timeMs = Math.round(currentTime * 1000);
-              return timeMs >= annotation.startMs && timeMs <= annotation.endMs;
-            });
-            
-            // Sort by z-index (lowest to highest) so higher z-index renders on top
-            const sorted = [...filtered].sort((a, b) => a.zIndex - b.zIndex);
-            
-            // Handle click-through cycling: when clicking same annotation, cycle to next
-            const handleAnnotationClick = (clickedId: string) => {
-              if (!onSelectAnnotation) return;
-              
-              // If clicking on already selected annotation and there are multiple overlapping
-              if (clickedId === selectedAnnotationId && sorted.length > 1) {
-                // Find current index and cycle to next
-                const currentIndex = sorted.findIndex(a => a.id === clickedId);
-                const nextIndex = (currentIndex + 1) % sorted.length;
-                onSelectAnnotation(sorted[nextIndex].id);
-              } else {
-                // First click or clicking different annotation
-                onSelectAnnotation(clickedId);
-              }
-            };
-            
-            return sorted.map((annotation) => (
+          {visibleAnnotations.map((annotation) => (
               <AnnotationOverlay
                 key={annotation.id}
                 annotation={annotation}
@@ -1066,8 +1126,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
                 zIndex={annotation.zIndex}
                 isSelectedBoost={annotation.id === selectedAnnotationId}
               />
-            ));
-          })()}
+            ))}
         </div>
       )}
       <video
@@ -1088,4 +1147,26 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
 
 VideoPlayback.displayName = 'VideoPlayback';
 
-export default VideoPlayback;
+// Wrap with React.memo to avoid re-renders from parent's currentTime state changes.
+// currentTime is used only for annotation visibility (via useMemo inside), but the
+// PixiJS ticker drives the actual playback via currentTimeRef. We quantize currentTime
+// so the component only re-renders when annotations might have changed visibility (~10fps).
+const MemoizedVideoPlayback = memo(VideoPlayback, (prevProps, nextProps) => {
+  // Quantize currentTime to 100ms buckets — good enough for annotation show/hide
+  const prevTimeQ = Math.floor(prevProps.currentTime * 10);
+  const nextTimeQ = Math.floor(nextProps.currentTime * 10);
+
+  // Shallow compare all props except currentTime (which we quantize)
+  for (const key of Object.keys(nextProps) as (keyof VideoPlaybackProps)[]) {
+    if (key === 'currentTime') {
+      if (prevTimeQ !== nextTimeQ) return false;
+      continue;
+    }
+    if ((prevProps as any)[key] !== (nextProps as any)[key]) return false;
+  }
+  return true;
+});
+
+MemoizedVideoPlayback.displayName = 'MemoizedVideoPlayback';
+
+export default MemoizedVideoPlayback;

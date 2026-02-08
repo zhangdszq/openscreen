@@ -26,9 +26,19 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
     trimRegionsRef,
   } = params;
 
-  const emitTime = (timeValue: number) => {
+  // Throttle onTimeUpdate to ~30fps during playback to reduce React re-renders.
+  // The ref (currentTimeRef) is still updated every frame so the PixiJS ticker
+  // always has the latest time for smooth zoom/pan animations.
+  let lastEmitTime = 0;
+  const EMIT_INTERVAL_MS = 33; // ~30fps for React state updates
+
+  const emitTime = (timeValue: number, force: boolean = false) => {
     currentTimeRef.current = timeValue * 1000;
-    onTimeUpdate(timeValue);
+    const now = performance.now();
+    if (force || now - lastEmitTime >= EMIT_INTERVAL_MS) {
+      lastEmitTime = now;
+      onTimeUpdate(timeValue);
+    }
   };
 
   // Helper function to check if current time is within a trim region
@@ -39,8 +49,15 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
     ) || null;
   };
 
+  // Performance diagnostics for time update loop
+  let rafFrameCount = 0;
+  let rafTotalMs = 0;
+  let rafMaxMs = 0;
+  let lastRafLogTime = performance.now();
+
   function updateTime() {
     if (!video) return;
+    const rafStart = performance.now();
     
     const currentTimeMs = video.currentTime * 1000;
     const activeTrimRegion = findActiveTrimRegion(currentTimeMs);
@@ -58,6 +75,25 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
       }
     } else {
       emitTime(video.currentTime);
+    }
+
+    // Performance logging
+    const rafEnd = performance.now();
+    const rafMs = rafEnd - rafStart;
+    rafFrameCount++;
+    rafTotalMs += rafMs;
+    if (rafMs > rafMaxMs) rafMaxMs = rafMs;
+
+    if (rafEnd - lastRafLogTime >= 3000) {
+      const avgMs = rafTotalMs / rafFrameCount;
+      console.log(
+        `[Perf:RAF] ${rafFrameCount} frames in 3s (${(rafFrameCount / 3).toFixed(1)} fps), ` +
+        `avg=${avgMs.toFixed(2)}ms, max=${rafMaxMs.toFixed(2)}ms`
+      );
+      rafFrameCount = 0;
+      rafTotalMs = 0;
+      rafMaxMs = 0;
+      lastRafLogTime = rafEnd;
     }
     
     if (!video.paused && !video.ended) {
@@ -91,7 +127,7 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
       cancelAnimationFrame(timeUpdateAnimationRef.current);
       timeUpdateAnimationRef.current = null;
     }
-    emitTime(video.currentTime);
+    emitTime(video.currentTime, true);
   };
 
   const handleSeeked = () => {
@@ -108,13 +144,13 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
         video.pause();
       } else {
         video.currentTime = skipToTime;
-        emitTime(skipToTime);
+        emitTime(skipToTime, true);
       }
     } else {
       if (!isPlayingRef.current && !video.paused) {
         video.pause();
       }
-      emitTime(video.currentTime);
+      emitTime(video.currentTime, true);
     }
   };
 
@@ -124,7 +160,7 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
     if (!isPlayingRef.current && !video.paused) {
       video.pause();
     }
-    emitTime(video.currentTime);
+    emitTime(video.currentTime, true);
   };
 
   return {

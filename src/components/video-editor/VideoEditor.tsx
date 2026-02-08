@@ -159,6 +159,7 @@ export default function VideoEditor() {
   const flowGraph = useKeyframeStore(state => state.flowGraph);
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
+  const splitCameraVideoRef = useRef<HTMLVideoElement>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const [splitContainerSize, setSplitContainerSize] = useState({ width: 0, height: 0 });
   const nextZoomIdRef = useRef(1);
@@ -166,6 +167,17 @@ export default function VideoEditor() {
   const nextAnnotationIdRef = useRef(1);
   const nextAnnotationZIndexRef = useRef(1); // Track z-index for stacking order
   const exporterRef = useRef<VideoExporter | ExportManager | null>(null);
+
+  // Sync split-screen camera video play/pause state (avoid ref callback that runs every render)
+  useEffect(() => {
+    const el = splitCameraVideoRef.current;
+    if (!el) return;
+    if (isPlaying && el.paused) {
+      el.play().catch(() => {});
+    } else if (!isPlaying && !el.paused) {
+      el.pause();
+    }
+  }, [isPlaying]);
 
   // Helper to convert file path to proper file:// URL
   const toFileUrl = (filePath: string): string => {
@@ -307,6 +319,20 @@ export default function VideoEditor() {
     if (!video) return;
     video.currentTime = time;
   }
+
+  // Stable callback for onDurationChange — avoids re-creating inline functions that break React.memo
+  const handleDurationChange = useCallback((dur: number) => {
+    setDuration(dur);
+    const pendingRegion = (window as any).__pendingRegionCrop;
+    if (pendingRegion && videoPlaybackRef.current?.video) {
+      const video = videoPlaybackRef.current.video;
+      const crop = computeRegionCrop(pendingRegion, video.videoWidth, video.videoHeight);
+      if (crop) {
+        setCropRegion(crop);
+        delete (window as any).__pendingRegionCrop;
+      }
+    }
+  }, []);
 
   const handleSelectZoom = useCallback((id: string | null) => {
     setSelectedZoomId(id);
@@ -1258,19 +1284,7 @@ export default function VideoEditor() {
                               style={getCameraVideoStyle()}
                               muted
                               playsInline
-                              ref={(el) => {
-                                if (el) {
-                                  const targetTime = currentTime;
-                                  if (Math.abs(el.currentTime - targetTime) > 0.1) {
-                                    el.currentTime = targetTime;
-                                  }
-                                  if (isPlaying && el.paused) {
-                                    el.play().catch(() => {});
-                                  } else if (!isPlaying && !el.paused) {
-                                    el.pause();
-                                  }
-                                }
-                              }}
+                              ref={splitCameraVideoRef}
                             />
                           </div>
                           <ResizeHandle onMouseDown={handleCameraResizeStart} />
@@ -1302,18 +1316,7 @@ export default function VideoEditor() {
                               ref={videoPlaybackRef}
                               videoPath={videoPath || ''}
                               hideBackground={true}
-                              onDurationChange={(dur) => {
-                                setDuration(dur);
-                                const pendingRegion = (window as any).__pendingRegionCrop;
-                                if (pendingRegion && videoPlaybackRef.current?.video) {
-                                  const video = videoPlaybackRef.current.video;
-                                  const crop = computeRegionCrop(pendingRegion, video.videoWidth, video.videoHeight);
-                                  if (crop) {
-                                    setCropRegion(crop);
-                                    delete (window as any).__pendingRegionCrop;
-                                  }
-                                }
-                              }}
+                              onDurationChange={handleDurationChange}
                               onTimeUpdate={setCurrentTime}
                               currentTime={currentTime}
                               onPlayStateChange={setIsPlaying}
@@ -1414,18 +1417,7 @@ export default function VideoEditor() {
                           aspectRatio={aspectRatio}
                           ref={videoPlaybackRef}
                           videoPath={videoPath || ''}
-                          onDurationChange={(dur) => {
-                            setDuration(dur);
-                            const pendingRegion = (window as any).__pendingRegionCrop;
-                            if (pendingRegion && videoPlaybackRef.current?.video) {
-                              const video = videoPlaybackRef.current.video;
-                              const crop = computeRegionCrop(pendingRegion, video.videoWidth, video.videoHeight);
-                              if (crop) {
-                                setCropRegion(crop);
-                                delete (window as any).__pendingRegionCrop;
-                              }
-                            }
-                          }}
+                          onDurationChange={handleDurationChange}
                           onTimeUpdate={setCurrentTime}
                           currentTime={currentTime}
                           onPlayStateChange={setIsPlaying}
