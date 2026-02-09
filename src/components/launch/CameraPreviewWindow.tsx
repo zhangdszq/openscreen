@@ -169,8 +169,8 @@ export function CameraPreviewWindow() {
       const deltaX = e.screenX - resizeStartRef.current.x;
       const deltaY = e.screenY - resizeStartRef.current.y;
       
-      // For circle: uniform resize; for rectangle: independent width/height
-      if (options.shape === 'circle') {
+      // For circle/square: uniform resize; for rectangle: independent width/height
+      if (options.shape === 'circle' || options.shape === 'square') {
         // Circle: use single dimension (uniform resize)
         let delta = 0;
         switch (resizeDirection) {

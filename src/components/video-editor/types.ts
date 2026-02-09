@@ -349,7 +349,7 @@ export function createEmptyFlowGraph(name: string = '未命名流程图'): FlowG
 // Camera Overlay (Picture-in-Picture) Types
 // ============================================================================
 
-export type CameraOverlayShape = 'circle' | 'rectangle';
+export type CameraOverlayShape = 'circle' | 'square' | 'rectangle';
 export type CameraOverlayPosition = 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right' | 'custom';
 export type CameraBackgroundMode = 'original' | 'remove' | 'blur' | 'custom';
 

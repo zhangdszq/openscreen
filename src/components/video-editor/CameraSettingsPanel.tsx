@@ -8,7 +8,7 @@
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
-import { Camera, FlipHorizontal, User, Sparkles, Circle, Square } from "lucide-react";
+import { Camera, FlipHorizontal, User, Sparkles, Circle, Square, RectangleHorizontal } from "lucide-react";
 import type { 
   CameraOverlay, 
   CameraOverlayShape,
@@ -122,9 +122,10 @@ export function CameraSettingsPanel({
       updates.splitRatio = config.splitRatio;
     }
     
-    // 分屏模式必须使用矩形形状
+    // 分屏模式必须使用矩形形状，圆角默认20
     if (mode.startsWith('split-')) {
       updates.shape = 'rectangle';
+      updates.borderRadius = 20;
     }
     
     onOverlayChange({
@@ -134,9 +135,15 @@ export function CameraSettingsPanel({
   };
 
   const handleShapeChange = (shape: CameraOverlayShape) => {
+    const updates: Partial<CameraOverlay> = { shape };
+    if (shape === 'square') {
+      updates.borderRadius = 40;
+    } else if (shape === 'rectangle') {
+      updates.borderRadius = 0;
+    }
     onOverlayChange({
       ...overlay,
-      shape,
+      ...updates,
     });
   };
 
@@ -311,7 +318,7 @@ export function CameraSettingsPanel({
         {/* 形状选择 */}
         <div>
           <h3 className="text-xs text-white/50 mb-2 font-medium">形状</h3>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               onClick={() => handleShapeChange('circle')}
               disabled={!overlay.enabled}
@@ -327,6 +334,20 @@ export function CameraSettingsPanel({
               圆形
             </button>
             <button
+              onClick={() => handleShapeChange('square')}
+              disabled={!overlay.enabled}
+              className={cn(
+                "flex items-center justify-center gap-2 py-2.5 rounded-lg transition-all border text-xs",
+                overlay.shape === 'square' && overlay.enabled
+                  ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-400"
+                  : "border-white/5 bg-white/5 text-white/60 hover:bg-white/10",
+                !overlay.enabled && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <Square className="w-3.5 h-3.5" />
+              正方形
+            </button>
+            <button
               onClick={() => handleShapeChange('rectangle')}
               disabled={!overlay.enabled}
               className={cn(
@@ -337,7 +358,7 @@ export function CameraSettingsPanel({
                 !overlay.enabled && "opacity-50 cursor-not-allowed"
               )}
             >
-              <Square className="w-3.5 h-3.5" />
+              <RectangleHorizontal className="w-3.5 h-3.5" />
               矩形
             </button>
           </div>

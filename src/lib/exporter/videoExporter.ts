@@ -318,7 +318,7 @@ export class VideoExporter {
           
           // Calculate camera overlay dimensions and position
           const pipWidth = (overlay.size / 100) * this.config.width;
-          const pipHeight = overlay.shape === 'circle' ? pipWidth : pipWidth * 0.75;
+          const pipHeight = overlay.shape === 'rectangle' ? pipWidth * 0.75 : pipWidth;
           const pipX = overlay.position.x * this.config.width - pipWidth / 2;
           const pipY = overlay.position.y * this.config.height - pipHeight / 2;
           

@@ -379,8 +379,9 @@ export function LaunchWindow() {
 
                       <div className="space-y-2">
                         <label className="text-[11px] text-white/45 font-medium">形状</label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                           <button onClick={() => setCameraSettings(p => ({...p, shape: 'circle'}))} className={`py-2.5 text-[11px] rounded-xl transition-all ${cameraSettings.shape === 'circle' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : `${styles.glassCard} text-white/50`}`}>圆形</button>
+                          <button onClick={() => setCameraSettings(p => ({...p, shape: 'square'}))} className={`py-2.5 text-[11px] rounded-xl transition-all ${cameraSettings.shape === 'square' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : `${styles.glassCard} text-white/50`}`}>正方形</button>
                           <button onClick={() => setCameraSettings(p => ({...p, shape: 'rectangle'}))} className={`py-2.5 text-[11px] rounded-xl transition-all ${cameraSettings.shape === 'rectangle' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : `${styles.glassCard} text-white/50`}`}>矩形</button>
                         </div>
                       </div>

@@ -41,7 +41,7 @@ export function PictureInPicture({
 
   // Calculate pixel dimensions from percentage
   const pipWidth = (overlay.size / 100) * containerWidth;
-  const pipHeight = overlay.shape === 'circle' ? pipWidth : pipWidth * 0.75;
+  const pipHeight = overlay.shape === 'rectangle' ? pipWidth * 0.75 : pipWidth;
   
   // Calculate pixel position (position is where the center should be)
   const pipX = overlay.position.x * containerWidth - pipWidth / 2;
