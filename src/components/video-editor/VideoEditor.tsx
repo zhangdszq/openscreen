@@ -55,8 +55,7 @@ import { getAssetPath } from "@/lib/assetPath";
 
 // Pro Feature imports
 import { Feature, isFeatureEnabled } from "@/lib/features";
-import { FeatureGate } from "@/components/common/FeatureGate";
-import { KeyframePanel, FlowEditor, useKeyframeStore, downloadFigmaPackage } from "@/pro";
+import { FlowEditor, useKeyframeStore, downloadFigmaPackage } from "@/pro";
 import { KeyframeMarkdownPanel } from "@/pro/keyframe/KeyframeMarkdownPanel";
 
 const WALLPAPER_COUNT = 18;
@@ -156,7 +155,7 @@ export default function VideoEditor() {
   
   // Pro feature state
   const [showFlowEditor, setShowFlowEditor] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<'settings' | 'keyframes'>('settings');
+  // rightPanelTab removed - keyframes moved to left sidebar
   const [showMarkdownDoc, setShowMarkdownDoc] = useState(false);
   const flowGraph = useKeyframeStore(state => state.flowGraph);
 
@@ -1059,6 +1058,15 @@ export default function VideoEditor() {
           cameraVideoPath={cameraVideoPath}
           activePanel={activeToolbarPanel}
           onActivePanelChange={setActiveToolbarPanel}
+          videoRef={videoPlaybackRef}
+          currentTimeMs={Math.round(currentTime * 1000)}
+          mouseTrackData={{ events: mouseClickEvents, screenBounds: { width: 1920, height: 1080 } }}
+          aspectRatio={aspectRatio}
+          wallpaper={wallpaper}
+          onSeekFromKeyframe={handleSeekFromKeyframe}
+          onOpenFlowEditor={handleOpenFlowEditor}
+          onExportFlowGraph={handleExportFlowGraph}
+          onOpenMarkdownDoc={() => setShowMarkdownDoc(true)}
         />
 
         {/* Center Column - Video & Timeline */}
@@ -1520,37 +1528,8 @@ export default function VideoEditor() {
           </PanelGroup>
         </div>
 
-          {/* Right section: settings panel with Pro features tab */}
+          {/* Right section: settings panel */}
           <div className="flex-[2] min-w-0 flex flex-col h-full">
-            {/* Tab switcher for Pro features */}
-            <FeatureGate feature={Feature.PRO_KEYFRAME_EXTRACT}>
-              <div className="flex mb-2 bg-white/5 rounded-lg p-1">
-                <button
-                  onClick={() => setRightPanelTab('settings')}
-                  className={`flex-1 py-1.5 px-3 text-xs font-medium rounded-md transition-colors ${
-                    rightPanelTab === 'settings'
-                      ? 'bg-white/10 text-white'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  设置
-                </button>
-                <button
-                  onClick={() => setRightPanelTab('keyframes')}
-                  className={`flex-1 py-1.5 px-3 text-xs font-medium rounded-md transition-colors ${
-                    rightPanelTab === 'keyframes'
-                      ? 'bg-[#34B27B]/20 text-[#34B27B]'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  关键帧
-                  <span className="ml-1 px-1 py-0.5 text-[9px] bg-gradient-to-r from-amber-500 to-orange-500 text-black font-bold rounded uppercase">Pro</span>
-                </button>
-              </div>
-            </FeatureGate>
-
-            {/* Panel content */}
-            {rightPanelTab === 'settings' ? (
               <SettingsPanel
                 selected={wallpaper}
                 onWallpaperChange={setWallpaper}
@@ -1599,21 +1578,6 @@ export default function VideoEditor() {
                 onAnnotationFigureDataChange={handleAnnotationFigureDataChange}
                 onAnnotationDelete={handleAnnotationDelete}
               />
-            ) : (
-              <div className="flex-1 bg-[#09090b] border border-white/5 rounded-2xl overflow-hidden">
-                <KeyframePanel
-                  videoRef={videoPlaybackRef}
-                  currentTimeMs={Math.round(currentTime * 1000)}
-                  mouseTrackData={{ events: mouseClickEvents, screenBounds: { width: 1920, height: 1080 } }}
-                  aspectRatio={aspectRatio}
-                  wallpaper={wallpaper}
-                  onSeek={handleSeekFromKeyframe}
-                  onOpenFlowEditor={handleOpenFlowEditor}
-                  onExport={handleExportFlowGraph}
-                  onOpenMarkdownDoc={() => setShowMarkdownDoc(true)}
-                />
-              </div>
-            )}
           </div>
       </div>
 

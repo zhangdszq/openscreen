@@ -6,6 +6,7 @@
  * The panel pushes the canvas instead of overlaying it.
  */
 
+import React from "react";
 import { cn } from "@/lib/utils";
 import { 
   Camera, 
@@ -14,27 +15,43 @@ import {
   Shapes, 
   Type, 
   Wand2,
-  ChevronLeft
+  ChevronLeft,
+  Frame,
 } from "lucide-react";
 import { CameraSettingsPanel } from "./CameraSettingsPanel";
-import type { CameraOverlay } from "./types";
+import type { CameraOverlay, MouseTrackData } from "./types";
+import type { AspectRatio } from "@/utils/aspectRatioUtils";
+import { Feature, isFeatureEnabled } from "@/lib/features";
+import { KeyframePanel } from "@/pro";
+import type { VideoPlaybackRef } from "./VideoPlayback";
 
 interface LeftToolbarProps {
   cameraOverlay: CameraOverlay;
   onCameraOverlayChange: (overlay: CameraOverlay) => void;
   cameraVideoPath: string | null;
+  // Keyframe panel props
+  videoRef?: React.RefObject<VideoPlaybackRef | null>;
+  currentTimeMs?: number;
+  mouseTrackData?: MouseTrackData;
+  aspectRatio?: AspectRatio;
+  wallpaper?: string;
+  onSeekFromKeyframe?: (timeMs: number) => void;
+  onOpenFlowEditor?: () => void;
+  onExportFlowGraph?: () => void;
+  onOpenMarkdownDoc?: () => void;
 }
 
-export type ActivePanel = 'camera' | 'microphone' | 'cursor' | 'shapes' | 'text' | 'effects' | null;
+export type ActivePanel = 'camera' | 'microphone' | 'cursor' | 'shapes' | 'text' | 'effects' | 'keyframes' | null;
 
 // 工具按钮配置
-const TOOLS: { id: ActivePanel; icon: React.ReactNode; label: string; available: boolean }[] = [
+const TOOLS: { id: ActivePanel; icon: React.ReactNode; label: string; available: boolean; pro?: boolean }[] = [
   { id: 'camera', icon: <Camera className="w-5 h-5" />, label: '摄像头', available: true },
   { id: 'microphone', icon: <Mic className="w-5 h-5" />, label: '麦克风', available: false },
   { id: 'cursor', icon: <MousePointer2 className="w-5 h-5" />, label: '光标', available: false },
   { id: 'shapes', icon: <Shapes className="w-5 h-5" />, label: '形状', available: false },
   { id: 'text', icon: <Type className="w-5 h-5" />, label: '文字', available: false },
   { id: 'effects', icon: <Wand2 className="w-5 h-5" />, label: '效果', available: false },
+  { id: 'keyframes', icon: <Frame className="w-5 h-5" />, label: '关键帧', available: true, pro: true },
 ];
 
 export function LeftToolbar({
@@ -43,6 +60,15 @@ export function LeftToolbar({
   cameraVideoPath,
   activePanel,
   onActivePanelChange,
+  videoRef,
+  currentTimeMs = 0,
+  mouseTrackData,
+  aspectRatio,
+  wallpaper,
+  onSeekFromKeyframe,
+  onOpenFlowEditor,
+  onExportFlowGraph,
+  onOpenMarkdownDoc,
 }: LeftToolbarProps & {
   activePanel: ActivePanel;
   onActivePanelChange: (panel: ActivePanel) => void;
@@ -56,6 +82,18 @@ export function LeftToolbar({
   };
 
   const isPanelOpen = activePanel !== null;
+  const isKeyframePanel = activePanel === 'keyframes';
+  // Keyframe panel needs more width
+  const panelWidth = isKeyframePanel ? 'w-80' : 'w-64';
+  const panelInnerWidth = isKeyframePanel ? 'w-80' : 'w-64';
+
+  // Filter tools: only show keyframes tool if feature is enabled
+  const visibleTools = TOOLS.filter(tool => {
+    if (tool.id === 'keyframes') {
+      return isFeatureEnabled(Feature.PRO_KEYFRAME_EXTRACT);
+    }
+    return true;
+  });
 
   return (
     <div className="flex h-full flex-shrink-0">
@@ -64,7 +102,7 @@ export function LeftToolbar({
         data-toolbar="left"
         className="w-14 flex-shrink-0 bg-[#0d0d0f]/80 backdrop-blur-xl border-r border-white/5 flex flex-col items-center py-3 gap-1"
       >
-        {TOOLS.map((tool) => {
+        {visibleTools.map((tool) => {
           const isActive = activePanel === tool.id;
           const isEnabled = tool.available;
           
@@ -85,9 +123,15 @@ export function LeftToolbar({
             >
               {tool.icon}
               
+              {/* Pro 标签 */}
+              {tool.pro && (
+                <span className="absolute -top-1 -right-1 px-1 py-0.5 text-[7px] bg-gradient-to-r from-amber-500 to-orange-500 text-black font-bold rounded leading-none uppercase">Pro</span>
+              )}
+              
               {/* Tooltip */}
               <div className="absolute left-full ml-2 px-2 py-1 bg-black/90 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
                 {tool.label}
+                {tool.pro && <span className="ml-1 px-1 py-0.5 text-[9px] bg-gradient-to-r from-amber-500 to-orange-500 text-black font-bold rounded uppercase">Pro</span>}
                 {!isEnabled && <span className="text-white/40 ml-1">(即将推出)</span>}
               </div>
               
@@ -105,11 +149,11 @@ export function LeftToolbar({
         className={cn(
           "h-full bg-[#0d0d0f]/95 backdrop-blur-xl border-r border-white/5 transition-all duration-300 ease-out overflow-hidden flex-shrink-0",
           isPanelOpen 
-            ? "w-64 opacity-100" 
+            ? `${panelWidth} opacity-100` 
             : "w-0 opacity-0"
         )}
       >
-        <div className="w-64 h-full relative">
+        <div className={cn(panelInnerWidth, "h-full relative")}>
           {/* 面板头部关闭按钮 */}
           <button
             onClick={() => onActivePanelChange(null)}
@@ -127,8 +171,25 @@ export function LeftToolbar({
             />
           )}
 
+          {/* 关键帧 Pro 面板 */}
+          {activePanel === 'keyframes' && videoRef && (
+            <div className="h-full overflow-hidden">
+              <KeyframePanel
+                videoRef={videoRef}
+                currentTimeMs={currentTimeMs}
+                mouseTrackData={mouseTrackData}
+                aspectRatio={aspectRatio}
+                wallpaper={wallpaper}
+                onSeek={onSeekFromKeyframe}
+                onOpenFlowEditor={onOpenFlowEditor}
+                onExport={onExportFlowGraph}
+                onOpenMarkdownDoc={onOpenMarkdownDoc}
+              />
+            </div>
+          )}
+
           {/* 其他面板占位 */}
-          {activePanel && activePanel !== 'camera' && (
+          {activePanel && activePanel !== 'camera' && activePanel !== 'keyframes' && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center p-6">
                 <Wand2 className="w-12 h-12 text-white/20 mx-auto mb-3" />
