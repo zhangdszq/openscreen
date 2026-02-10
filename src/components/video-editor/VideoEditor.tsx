@@ -248,6 +248,20 @@ export default function VideoEditor() {
             }
           }
           
+          // Try to detect window recording (has .window.json marker)
+          if (checkFileExists) {
+            try {
+              const windowInfoPath = result.path.replace(/\.[^.]+$/, '.window.json');
+              const isWindowRecording = await checkFileExists(windowInfoPath);
+              if (isWindowRecording) {
+                console.log('Detected window recording, setting default borderRadius');
+                setBorderRadius(10);
+              }
+            } catch (err) {
+              console.log('Error checking window info:', err);
+            }
+          }
+
           // Try to load camera video (recorded separately)
           const cameraPath = result.path.replace('.webm', '.camera.webm');
           console.log('Checking for camera video at:', cameraPath);

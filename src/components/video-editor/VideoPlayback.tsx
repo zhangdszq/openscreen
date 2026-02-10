@@ -644,14 +644,15 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     (async () => {
       app = new Application();
       
-      // Cap resolution at 1 for playback preview — high DPR (e.g. 2x) doubles
-      // the rendering pixel count with negligible visual benefit for video content.
+      // Use device pixel ratio for sharp rendering on HiDPI/Retina displays.
+      // Cap at 2 to avoid excessive GPU load on 3x displays.
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       await app.init({
         width: container.clientWidth,
         height: container.clientHeight,
         backgroundAlpha: 0,
         antialias: false,
-        resolution: 1,
+        resolution: dpr,
         autoDensity: true,
       });
 

@@ -1010,6 +1010,17 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             }
           }
 
+          // Save window info if this was a window recording
+          if (isWindowSource && window.electronAPI?.saveRegionInfo) {
+            const windowFileName = `recording-${timestamp}.window.json`;
+            try {
+              await window.electronAPI.saveRegionInfo({ isWindow: true }, windowFileName);
+              console.log('Window info saved:', windowFileName);
+            } catch (error) {
+              console.warn('Failed to save window info:', error);
+            }
+          }
+
           if (videoResult.path) {
             await window.electronAPI.setCurrentVideoPath(videoResult.path);
           }
