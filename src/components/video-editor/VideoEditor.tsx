@@ -57,6 +57,7 @@ import { getAssetPath } from "@/lib/assetPath";
 import { Feature, isFeatureEnabled } from "@/lib/features";
 import { FeatureGate } from "@/components/common/FeatureGate";
 import { KeyframePanel, FlowEditor, useKeyframeStore, downloadFigmaPackage } from "@/pro";
+import { KeyframeMarkdownPanel } from "@/pro/keyframe/KeyframeMarkdownPanel";
 
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_PATHS = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `/wallpapers/wallpaper${i + 1}.jpg`);
@@ -156,6 +157,7 @@ export default function VideoEditor() {
   // Pro feature state
   const [showFlowEditor, setShowFlowEditor] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<'settings' | 'keyframes'>('settings');
+  const [showMarkdownDoc, setShowMarkdownDoc] = useState(false);
   const flowGraph = useKeyframeStore(state => state.flowGraph);
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
@@ -710,19 +712,22 @@ export default function VideoEditor() {
   // Global Tab prevention
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Allow all keys through when focus is in an editable element
+      // (input, textarea, or contenteditable like Tiptap/ProseMirror)
+      const target = e.target as Element;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.closest?.('[contenteditable="true"]')
+      ) {
+        return;
+      }
+
       if (e.key === 'Tab') {
-        // Allow tab only in inputs/textareas
-        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-          return;
-        }
         e.preventDefault();
       }
 
       if (e.key === ' ' || e.code === 'Space') {
-        // Allow space only in inputs/textareas
-        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-          return;
-        }
         e.preventDefault();
         
         const playback = videoPlaybackRef.current;
@@ -1605,6 +1610,7 @@ export default function VideoEditor() {
                   onSeek={handleSeekFromKeyframe}
                   onOpenFlowEditor={handleOpenFlowEditor}
                   onExport={handleExportFlowGraph}
+                  onOpenMarkdownDoc={() => setShowMarkdownDoc(true)}
                 />
               </div>
             )}
@@ -1628,6 +1634,13 @@ export default function VideoEditor() {
         <FlowEditor
           onClose={handleCloseFlowEditor}
           onExport={handleExportFlowGraph}
+        />
+      )}
+
+      {/* Pro Feature: Markdown Document Full-screen Editor */}
+      {showMarkdownDoc && isFeatureEnabled(Feature.PRO_MARKDOWN_DOC) && (
+        <KeyframeMarkdownPanel
+          onClose={() => setShowMarkdownDoc(false)}
         />
       )}
     </div>

@@ -21,6 +21,7 @@ import {
   Download,
   Loader2,
   ImageIcon,
+  FileText,
 } from 'lucide-react';
 import type { Application } from 'pixi.js';
 import { useKeyframeStore } from './keyframeStore';
@@ -53,6 +54,8 @@ interface KeyframePanelProps {
   onOpenFlowEditor?: () => void;
   /** Callback to export keyframes */
   onExport?: () => void;
+  /** Callback to open markdown document editor */
+  onOpenMarkdownDoc?: () => void;
 }
 
 export function KeyframePanel({
@@ -64,6 +67,7 @@ export function KeyframePanel({
   onSeek,
   onOpenFlowEditor,
   onExport,
+  onOpenMarkdownDoc,
 }: KeyframePanelProps) {
   const {
     flowGraph,
@@ -281,6 +285,13 @@ export function KeyframePanel({
       {/* Footer Actions */}
       {keyframes.length > 0 && (
         <div className="p-3 border-t border-white/10 space-y-2">
+          <button
+            onClick={onOpenMarkdownDoc}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#34B27B] hover:bg-[#2ea36d] text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            生成文档
+          </button>
           <button
             onClick={onOpenFlowEditor}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-white/10 hover:bg-white/15 text-slate-200 text-sm font-medium rounded-lg transition-colors"

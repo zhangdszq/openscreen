@@ -23,6 +23,7 @@ export enum Feature {
   PRO_FLOW_EDITOR = 'pro_flow_editor',
   PRO_FIGMA_EXPORT = 'pro_figma_export',
   PRO_MCP_BROWSER = 'pro_mcp_browser',
+  PRO_MARKDOWN_DOC = 'pro_markdown_doc',
 }
 
 /**
@@ -101,6 +102,13 @@ const featureConfigs: Record<Feature, FeatureConfig> = {
     id: Feature.PRO_MCP_BROWSER,
     name: 'MCP 浏览器集成',
     description: '通过 MCP 自动化录制浏览器操作',
+    tier: 'pro',
+    enabled: true,
+  },
+  [Feature.PRO_MARKDOWN_DOC]: {
+    id: Feature.PRO_MARKDOWN_DOC,
+    name: '步骤文档',
+    description: '将关键帧和说明生成可编辑的富文本文档',
     tier: 'pro',
     enabled: true,
   },

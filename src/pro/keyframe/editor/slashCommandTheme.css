@@ -1,0 +1,18 @@
+/**
+ * Tippy theme for the slash command dropdown.
+ */
+
+.tippy-box[data-theme='slash-command'] {
+  background: #1a1a1f;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 0;
+}
+
+.tippy-box[data-theme='slash-command'] .tippy-content {
+  padding: 0;
+}

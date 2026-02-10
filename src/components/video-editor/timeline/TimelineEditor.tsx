@@ -790,7 +790,13 @@ export default function TimelineEditor({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      // Skip when focus is in any editable element (input, textarea, contenteditable)
+      const target = e.target as Element;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.closest?.('[contenteditable="true"]')
+      ) {
         return;
       }
 
