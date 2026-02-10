@@ -19,6 +19,7 @@ import {
   Frame,
 } from "lucide-react";
 import { CameraSettingsPanel } from "./CameraSettingsPanel";
+import { CursorSettingsPanel, type CursorSettings } from "./CursorSettingsPanel";
 import type { CameraOverlay, MouseTrackData } from "./types";
 import type { AspectRatio } from "@/utils/aspectRatioUtils";
 import { Feature, isFeatureEnabled } from "@/lib/features";
@@ -29,6 +30,10 @@ interface LeftToolbarProps {
   cameraOverlay: CameraOverlay;
   onCameraOverlayChange: (overlay: CameraOverlay) => void;
   cameraVideoPath: string | null;
+  // Cursor settings props
+  cursorSettings?: CursorSettings;
+  onCursorSettingsChange?: (settings: CursorSettings) => void;
+  mouseClickCount?: number;
   // Keyframe panel props
   videoRef?: React.RefObject<VideoPlaybackRef | null>;
   currentTimeMs?: number;
@@ -47,7 +52,7 @@ export type ActivePanel = 'camera' | 'microphone' | 'cursor' | 'shapes' | 'text'
 const TOOLS: { id: ActivePanel; icon: React.ReactNode; label: string; available: boolean; pro?: boolean }[] = [
   { id: 'camera', icon: <Camera className="w-5 h-5" />, label: '摄像头', available: true },
   { id: 'microphone', icon: <Mic className="w-5 h-5" />, label: '麦克风', available: false },
-  { id: 'cursor', icon: <MousePointer2 className="w-5 h-5" />, label: '光标', available: false },
+  { id: 'cursor', icon: <MousePointer2 className="w-5 h-5" />, label: '光标', available: true },
   { id: 'shapes', icon: <Shapes className="w-5 h-5" />, label: '形状', available: false },
   { id: 'text', icon: <Type className="w-5 h-5" />, label: '文字', available: false },
   { id: 'effects', icon: <Wand2 className="w-5 h-5" />, label: '效果', available: false },
@@ -58,6 +63,9 @@ export function LeftToolbar({
   cameraOverlay,
   onCameraOverlayChange,
   cameraVideoPath,
+  cursorSettings,
+  onCursorSettingsChange,
+  mouseClickCount = 0,
   activePanel,
   onActivePanelChange,
   videoRef,
@@ -171,6 +179,15 @@ export function LeftToolbar({
             />
           )}
 
+          {/* 光标设置面板 */}
+          {activePanel === 'cursor' && cursorSettings && onCursorSettingsChange && (
+            <CursorSettingsPanel
+              settings={cursorSettings}
+              onSettingsChange={onCursorSettingsChange}
+              clickCount={mouseClickCount}
+            />
+          )}
+
           {/* 关键帧 Pro 面板 */}
           {activePanel === 'keyframes' && videoRef && (
             <div className="h-full overflow-hidden">
@@ -189,7 +206,7 @@ export function LeftToolbar({
           )}
 
           {/* 其他面板占位 */}
-          {activePanel && activePanel !== 'camera' && activePanel !== 'keyframes' && (
+          {activePanel && activePanel !== 'camera' && activePanel !== 'cursor' && activePanel !== 'keyframes' && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center p-6">
                 <Wand2 className="w-12 h-12 text-white/20 mx-auto mb-3" />

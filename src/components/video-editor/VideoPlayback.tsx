@@ -13,6 +13,8 @@ import { applyZoomTransform } from "./videoPlayback/zoomTransform";
 import { createVideoEventHandlers } from "./videoPlayback/videoEventHandlers";
 import { type AspectRatio, formatAspectRatioForCSS } from "@/utils/aspectRatioUtils";
 import { AnnotationOverlay } from "./AnnotationOverlay";
+import { MouseClickRipple } from "./MouseClickRipple";
+import type { RecordedMouseEvent } from "./types";
 
 interface VideoPlaybackProps {
   videoPath: string;
@@ -44,6 +46,14 @@ interface VideoPlaybackProps {
   onAnnotationSizeChange?: (id: string, size: { width: number; height: number }) => void;
   /** Hide background (for split layout mode where background is provided by parent) */
   hideBackground?: boolean;
+  /** Mouse click events for ripple effect */
+  mouseClickEvents?: RecordedMouseEvent[];
+  /** Whether click ripple effect is enabled */
+  clickRippleEnabled?: boolean;
+  /** Ripple effect color */
+  clickRippleColor?: string;
+  /** Ripple effect scale */
+  clickRippleScale?: number;
 }
 
 export interface VideoPlaybackRef {
@@ -85,6 +95,10 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   onAnnotationPositionChange,
   onAnnotationSizeChange,
   hideBackground = false,
+  mouseClickEvents = [],
+  clickRippleEnabled = false,
+  clickRippleColor = '#34B27B',
+  clickRippleScale = 1.5,
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -95,6 +109,8 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   const timeUpdateAnimationRef = useRef<number | null>(null);
   const [pixiReady, setPixiReady] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
+  // Stores the pixel rect where the visible video content is rendered within the container
+  const [videoContentRect, setVideoContentRect] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const focusIndicatorRef = useRef<HTMLDivElement | null>(null);
   const currentTimeRef = useRef(0);
@@ -221,6 +237,9 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       baseOffsetRef.current = result.baseOffset;
       baseMaskRef.current = result.maskRect;
       cropBoundsRef.current = result.cropBounds;
+
+      // Update the video content rect for DOM overlays (e.g. click ripple)
+      setVideoContentRect(result.maskRect);
 
       // Reset camera container to identity
       cameraContainer.scale.set(1);
@@ -1128,6 +1147,18 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
                 isSelectedBoost={annotation.id === selectedAnnotationId}
               />
             ))}
+          {/* Mouse click ripple effect */}
+          {clickRippleEnabled && mouseClickEvents.length > 0 && (
+            <MouseClickRipple
+              clickEvents={mouseClickEvents}
+              currentTime={currentTime}
+              isPlaying={isPlaying}
+              rippleColor={clickRippleColor}
+              rippleScale={clickRippleScale}
+              videoContentRect={videoContentRect}
+              cropRegion={cropRegion}
+            />
+          )}
         </div>
       )}
       <video

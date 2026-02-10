@@ -10,6 +10,7 @@ import TimelineEditor from "./timeline/TimelineEditor";
 import { SettingsPanel } from "./SettingsPanel";
 import { ExportDialog } from "./ExportDialog";
 import { LeftToolbar, type ActivePanel } from "./LeftToolbar";
+import { DEFAULT_CURSOR_SETTINGS, type CursorSettings } from "./CursorSettingsPanel";
 import { getLayoutConfig } from "./types";
 
 import type { Span } from "dnd-timeline";
@@ -148,6 +149,9 @@ export default function VideoEditor() {
   
   // Camera overlay (picture-in-picture) state
   const [cameraOverlay, setCameraOverlay] = useState<CameraOverlay>(DEFAULT_CAMERA_OVERLAY);
+  
+  // Cursor settings (click ripple effect)
+  const [cursorSettings, setCursorSettings] = useState<CursorSettings>(DEFAULT_CURSOR_SETTINGS);
   const [cameraVideoPath, setCameraVideoPath] = useState<string | null>(null);
   
   // Left toolbar panel state
@@ -1056,6 +1060,9 @@ export default function VideoEditor() {
           cameraOverlay={cameraOverlay}
           onCameraOverlayChange={handleCameraOverlayChange}
           cameraVideoPath={cameraVideoPath}
+          cursorSettings={cursorSettings}
+          onCursorSettingsChange={setCursorSettings}
+          mouseClickCount={mouseClickEvents.length}
           activePanel={activeToolbarPanel}
           onActivePanelChange={setActiveToolbarPanel}
           videoRef={videoPlaybackRef}
@@ -1368,6 +1375,10 @@ export default function VideoEditor() {
                               onSelectAnnotation={handleSelectAnnotation}
                               onAnnotationPositionChange={handleAnnotationPositionChange}
                               onAnnotationSizeChange={handleAnnotationSizeChange}
+                              mouseClickEvents={mouseClickEvents}
+                              clickRippleEnabled={cursorSettings.clickRippleEnabled}
+                              clickRippleColor={cursorSettings.rippleColor}
+                              clickRippleScale={cursorSettings.rippleScale}
                             />
                           </div>
                           <ResizeHandle onMouseDown={handleScreenResizeStart} />
@@ -1469,6 +1480,10 @@ export default function VideoEditor() {
                           onSelectAnnotation={handleSelectAnnotation}
                           onAnnotationPositionChange={handleAnnotationPositionChange}
                           onAnnotationSizeChange={handleAnnotationSizeChange}
+                          mouseClickEvents={mouseClickEvents}
+                          clickRippleEnabled={cursorSettings.clickRippleEnabled}
+                          clickRippleColor={cursorSettings.rippleColor}
+                          clickRippleScale={cursorSettings.rippleScale}
                         />
                       </div>
                     );
