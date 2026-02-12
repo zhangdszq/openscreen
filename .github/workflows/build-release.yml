@@ -64,7 +64,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libxinerama-dev libxi-dev libxrandr-dev libxkbcommon-dev
+          sudo apt-get install -y libx11-dev libxtst-dev libxinerama-dev libxi-dev libxrandr-dev libxkbcommon-dev libxt-dev
 
       - name: Install dependencies
         run: npm ci
@@ -72,10 +72,8 @@ jobs:
       - name: Install app dependencies
         run: npx electron-builder install-app-deps
 
-      - name: TypeScript compile
-        run: npx tsc
-
-      - name: Build frontend
+      # vite build 通过 esbuild 编译 TS（不做类型检查），同时 vite-plugin-electron 处理 electron 文件
+      - name: Build frontend and electron
         run: npx vite build
 
       # 按平台和架构打包
